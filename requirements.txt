@@ -1,0 +1,15 @@
+PySide6>=6.8
+mss>=9.0
+pynput>=1.7
+requests>=2.31
+Pillow>=10.0
+pyttsx3>=2.90
+# Windows OCR (новый pywinrt, поддерживает Python 3.13/3.14)
+winrt-runtime>=3.0 ; sys_platform == 'win32'
+winrt-Windows.Foundation>=3.0 ; sys_platform == 'win32'
+winrt-Windows.Foundation.Collections>=3.0 ; sys_platform == 'win32'
+winrt-Windows.Globalization>=3.0 ; sys_platform == 'win32'
+winrt-Windows.Graphics.Imaging>=3.0 ; sys_platform == 'win32'
+winrt-Windows.Media.Ocr>=3.0 ; sys_platform == 'win32'
+winrt-Windows.Storage.Streams>=3.0 ; sys_platform == 'win32'
+pytesseract>=0.3.10
