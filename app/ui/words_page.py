@@ -9,7 +9,8 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
                                QPushButton, QListWidget, QListWidgetItem, QScrollArea,
                                QFrame, QComboBox, QSplitter, QSplitterHandle, QTextEdit,
-                               QFileDialog, QMessageBox, QGridLayout, QSizePolicy)
+                               QFileDialog, QMessageBox, QGridLayout, QSizePolicy,
+                               QDialog, QDialogButtonBox)
 
 from ..config import CONFIG, flag_for, lang_name, LANGS
 from ..storage import WORDS
@@ -729,8 +730,53 @@ class WordsPage(QWidget):
             self.reload()
 
     def _export(self):
+        # сначала спрашиваем, из какого источника (игра/приложение/браузер) брать слова
+        src = self._ask_export_source()
+        if src is None:                 # отмена в диалоге выбора источника
+            return
+        ids = None
+        if src:                          # пустая строка == «Все источники»
+            ids = [e["id"] for e in WORDS.items if _src_key(e) == src]
+            if not ids:
+                return
+
+        suffix = "_" + _pretty_src(src).replace(" ", "_") if src else ""
         path, _ = QFileDialog.getSaveFileName(
-            self, t("Экспорт слов"), "lookupper_words.csv",
-            "CSV (*.csv);;JSON (*.json);;Anki TSV (*.txt)")
+            self, t("Экспорт слов"), f"wordsnap{suffix}_anki.txt",
+            "Anki (*.txt);;CSV (*.csv);;JSON (*.json)")
         if path:
-            WORDS.export(path)
+            WORDS.export(path, ids)
+
+    def _ask_export_source(self) -> str | None:
+        """Диалог выбора источника для экспорта. Возвращает ключ источника,
+        "" для всех источников или None, если пользователь отменил."""
+        srcs, seen = [], set()
+        for e in WORDS.items:
+            s = _src_key(e)
+            if s and s not in seen:
+                seen.add(s); srcs.append(s)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(t("Экспорт слов"))
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 18, 20, 16); lay.setSpacing(12)
+        lay.addWidget(QLabel(t("Источник для экспорта:")))
+
+        combo = QComboBox()
+        combo.addItem(svg_icon("filter.svg", ICON, 16), t("  Все источники"), "")
+        for s in srcs:
+            combo.addItem(_pretty_src(s), s)
+        # по умолчанию подставляем источник, выбранный сейчас в фильтре списка
+        cur = self.source_filter.currentData() if hasattr(self, "source_filter") else ""
+        idx = combo.findData(cur)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+        lay.addWidget(combo)
+
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+        lay.addWidget(box)
+
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        return combo.currentData()

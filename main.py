@@ -7,7 +7,7 @@ import sys
 import threading
 import traceback
 
-from PySide6.QtCore import QObject, Signal, Qt, QRect
+from PySide6.QtCore import QObject, Signal, Qt, QRect, QPoint
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
@@ -61,6 +61,7 @@ class Bridge(QObject):
     highlight_ready = Signal(int, int, int, int)
     words_changed = Signal()
     error = Signal(str)
+    outside_click = Signal(int, int)      # глобальный клик мимо попапа — закрыть его
 
 class Controller(QObject):
     def __init__(self, app: QApplication):
@@ -74,6 +75,7 @@ class Controller(QObject):
         self.hotkeys = HotkeyManager(CONFIG)
         self._pending_entry: dict | None = None
         self._busy = False
+        self._popup_open = False          # попап открыт → ловим клики мимо него
 
         self.hotkeys.triggered.connect(self.on_hotkey)
         self.hotkeys.escaped.connect(self.on_escape)
@@ -81,6 +83,8 @@ class Controller(QObject):
         self.window.words_page.fetch_missing.connect(self.fetch_missing)
         self.popup.bookmark_clicked.connect(self.save_pending_entry)
         self.popup.closed.connect(self.close_highlight)
+        self.popup.closed.connect(self._on_popup_closed)
+        self.bridge.outside_click.connect(self._on_outside_click)
 
         self.bridge.translator_ready.connect(self.popup.fill_translator)
         self.bridge.looktionary_ready.connect(self._on_looktionary)
@@ -92,7 +96,36 @@ class Controller(QObject):
 
         self._tray()
         self.hotkeys.start()
+        self._start_click_watch()
         self.window.show()
+
+    # ------------------------------------- закрытие попапа кликом мимо него
+    def _start_click_watch(self):
+        """Глобально следим за нажатиями мыши: пока попап открыт, клик вне его
+        окна закрывает попап. Через pynput — иначе клики по другим окнам Qt не видит."""
+        from pynput import mouse
+
+        def on_click(x, y, button, pressed):
+            if pressed and self._popup_open:
+                self.bridge.outside_click.emit(int(x), int(y))
+
+        self._click_listener = mouse.Listener(on_click=on_click)
+        self._click_listener.daemon = True
+        self._click_listener.start()
+
+    def _on_outside_click(self, x: int, y: int):
+        if not self.popup.isVisible():
+            self._popup_open = False
+            return
+        # клик внутри окна попапа (кнопки, закладка) — не закрываем
+        if self.popup.frameGeometry().contains(QPoint(x, y)):
+            return
+        self._popup_open = False
+        self.popup.close_animated()
+        self.close_highlight()
+
+    def _on_popup_closed(self):
+        self._popup_open = False
 
     # ------------------------------------------------------------- трей
     def _tray(self):
@@ -143,6 +176,7 @@ class Controller(QObject):
 
     def on_escape(self):
         """Глобальный Esc: закрывает попап/оверлей даже если фокус не на них."""
+        self._popup_open = False
         if self.popup.isVisible():
             self.popup.close_animated()      # окно сжимается и гаснет (не мгновенно)
         if self.overlay and self.overlay.isVisible():
@@ -178,6 +212,7 @@ class Controller(QObject):
         except Exception:
             light_bg = False
         self.popup.open_at(x, y, order, light=light_bg)
+        self._popup_open = True
 
         def worker():
             self._busy = True

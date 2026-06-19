@@ -115,31 +115,38 @@ class WordsStore:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(items, f, ensure_ascii=False, indent=2)
         elif ext == ".csv":
+            # CSV с управляющими строками Anki: разделитель и имена колонок заданы явно,
+            # поэтому Anki не «угадывает» формат и не превращает заголовок в карточку.
+            # Эти строки начинаются с #, обычные таблицы (Excel/Sheets) их просто игнорируют.
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                f.write("#separator:comma\n")
+                f.write("#columns:Слово,Перевод,Уровень,Транскрипция,"
+                        "Определение,Контекст,Перевод контекста,Синонимы\n")
                 w = csv.writer(f)
-                w.writerow(["Слово", "Перевод", "Уровень", "Транскрипция",
-                            "Определение", "Контекст", "Перевод контекста", "Синонимы"])
                 for it in items:
                     w.writerow([it.get("dict_form", ""), it.get("word_translation", ""),
                                 it.get("level", ""), it.get("transcription", ""),
                                 it.get("definition", ""), it.get("context", ""),
                                 it.get("context_translation", ""),
                                 ", ".join(it.get("synonyms", []))])
-        else:  # .txt / Anki TSV
+        else:  # .txt / Anki
             import shutil
-            # картинки кладём в папку рядом с файлом — её содержимое нужно скопировать
-            # в collection.media профиля Anki, тогда <img> в карточках заработают
+            # Anki: 2 поля — Front (слово) и Back (всё остальное одним HTML-блоком),
+            # чтобы карточки ложились прямо в стандартный тип «Basic» без настройки полей.
+            # Картинки кладём в папку рядом с файлом — её содержимое нужно скопировать
+            # в collection.media профиля Anki, тогда <img> в карточках заработают.
             media_dir = os.path.splitext(path)[0] + "_media"
             if any(it.get("screenshot") for it in items):
                 os.makedirs(media_dir, exist_ok=True)
 
-            def clean(s: str) -> str:
-                return (s or "").replace("\t", " ").replace("\r", "").replace("\n", "<br>")
+            def esc(s: str) -> str:
+                """Текст в одну строку без таба (разделитель) и переводов строк."""
+                return (s or "").replace("\t", " ").replace("\r", "").replace("\n", " ").strip()
 
             with open(path, "w", encoding="utf-8", newline="") as f:
-                # заголовки Anki: разделитель — таб, поля парсятся как HTML (для <img>)
+                # разделитель — таб, поля считаются HTML (нужно для <img> и <br>)
                 f.write("#separator:tab\n#html:true\n")
-                f.write("#columns:Word\tTranslation\tDefinition\tContext\tImage\n")
+                f.write("#columns:Front\tBack\n")
                 for it in items:
                     img = ""
                     shot = it.get("screenshot", "")
@@ -151,8 +158,21 @@ class WordsStore:
                                 img = f'<img src="{shot}">'
                             except OSError:
                                 pass
-                    row = [it.get("dict_form", ""), it.get("word_translation", ""),
-                           it.get("definition", ""), it.get("context", ""), img]
-                    f.write("\t".join(clean(c) for c in row) + "\n")
+                    # собираем оборот карточки: перевод, мета, определение, контекст, картинка
+                    parts = []
+                    if it.get("word_translation"):
+                        parts.append(f"<b>{esc(it['word_translation'])}</b>")
+                    meta = " · ".join(x for x in (esc(it.get("transcription", "")),
+                                                  esc(it.get("level", ""))) if x)
+                    if meta:
+                        parts.append(f'<span style="color:#888">{meta}</span>')
+                    if it.get("definition"):
+                        parts.append(esc(it["definition"]))
+                    if it.get("context"):
+                        parts.append(f'<i>{esc(it["context"])}</i>')
+                    if img:
+                        parts.append(img)
+                    back = "<br>".join(parts)
+                    f.write(f"{esc(it.get('dict_form', ''))}\t{back}\n")
 
 WORDS = WordsStore()

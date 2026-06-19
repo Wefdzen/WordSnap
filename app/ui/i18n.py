@@ -165,6 +165,7 @@ _EN = {
     "Удалить слово «%s»?": "Delete the word “%s”?",
     "Удалить выбранные слова (%d)?": "Delete selected words (%d)?",
     "Экспорт слов": "Export words",
+    "Источник для экспорта:": "Source to export:",
 
     # --- переводчик и словари ---
     "Переводчик": "Translator",
