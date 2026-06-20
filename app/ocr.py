@@ -74,9 +74,21 @@ class WindowsOcrEngine:
         except Exception:
             pass
         if engine is None:
-            engine = WinOcr.try_create_from_user_profile_languages()
-        if engine is None:
-            raise RuntimeError("Windows OCR недоступен. Установите языковой пакет Windows или Tesseract.")
+            # Запрошенный язык не установлен. Раньше тут была тихая подмена на
+            # системный язык — но он распознаёт чужой текст (например японский)
+            # как мусор. Поэтому честно сообщаем, как доустановить пакет.
+            avail = []
+            try:
+                for lng in WinOcr.available_recognizer_languages:
+                    avail.append(lng.display_name)
+            except Exception:
+                pass
+            msg = (f"Windows OCR для языка «{self.lang_tag}» не установлен.\n"
+                   "Поставьте его: Параметры Windows → Время и язык → Язык и регион → "
+                   "добавьте язык, затем в его «Параметрах языка» включите распознавание текста.")
+            if avail:
+                msg += "\nСейчас доступны: " + ", ".join(avail) + "."
+            raise RuntimeError(msg)
 
         result = await engine.recognize_async(bitmap)
         lines: list[OcrLine] = []

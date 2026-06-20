@@ -129,24 +129,22 @@ class WordsStore:
                                 it.get("definition", ""), it.get("context", ""),
                                 it.get("context_translation", ""),
                                 ", ".join(it.get("synonyms", []))])
-        else:  # .txt / Anki
+        else:  # .txt / Anki TSV
             import shutil
-            # Anki: 2 поля — Front (слово) и Back (всё остальное одним HTML-блоком),
-            # чтобы карточки ложились прямо в стандартный тип «Basic» без настройки полей.
-            # Картинки кладём в папку рядом с файлом — её содержимое нужно скопировать
-            # в collection.media профиля Anki, тогда <img> в карточках заработают.
+            # картинки кладём в папку рядом с файлом — её содержимое нужно скопировать
+            # в collection.media профиля Anki, тогда <img> в карточках заработают
             media_dir = os.path.splitext(path)[0] + "_media"
             if any(it.get("screenshot") for it in items):
                 os.makedirs(media_dir, exist_ok=True)
 
-            def esc(s: str) -> str:
-                """Текст в одну строку без таба (разделитель) и переводов строк."""
-                return (s or "").replace("\t", " ").replace("\r", "").replace("\n", " ").strip()
+            def clean(s: str) -> str:
+                return (s or "").replace("\t", " ").replace("\r", "").replace("\n", "<br>")
 
             with open(path, "w", encoding="utf-8", newline="") as f:
-                # разделитель — таб, поля считаются HTML (нужно для <img> и <br>)
+                # заголовки Anki: разделитель — таб, поля парсятся как HTML (для <img>)
                 f.write("#separator:tab\n#html:true\n")
-                f.write("#columns:Front\tBack\n")
+                f.write("#columns:Слово\tПеревод\tУровень\tТранскрипция\t"
+                        "Определение\tКонтекст\tСинонимы\tКартинка\n")
                 for it in items:
                     img = ""
                     shot = it.get("screenshot", "")
@@ -158,21 +156,10 @@ class WordsStore:
                                 img = f'<img src="{shot}">'
                             except OSError:
                                 pass
-                    # собираем оборот карточки: перевод, мета, определение, контекст, картинка
-                    parts = []
-                    if it.get("word_translation"):
-                        parts.append(f"<b>{esc(it['word_translation'])}</b>")
-                    meta = " · ".join(x for x in (esc(it.get("transcription", "")),
-                                                  esc(it.get("level", ""))) if x)
-                    if meta:
-                        parts.append(f'<span style="color:#888">{meta}</span>')
-                    if it.get("definition"):
-                        parts.append(esc(it["definition"]))
-                    if it.get("context"):
-                        parts.append(f'<i>{esc(it["context"])}</i>')
-                    if img:
-                        parts.append(img)
-                    back = "<br>".join(parts)
-                    f.write(f"{esc(it.get('dict_form', ''))}\t{back}\n")
+                    row = [it.get("dict_form", ""), it.get("word_translation", ""),
+                           it.get("level", ""), it.get("transcription", ""),
+                           it.get("definition", ""), it.get("context", ""),
+                           ", ".join(it.get("synonyms", [])), img]
+                    f.write("\t".join(clean(c) for c in row) + "\n")
 
 WORDS = WordsStore()

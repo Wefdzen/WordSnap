@@ -730,26 +730,41 @@ class WordsPage(QWidget):
             self.reload()
 
     def _export(self):
-        # сначала спрашиваем, из какого источника (игра/приложение/браузер) брать слова
-        src = self._ask_export_source()
-        if src is None:                 # отмена в диалоге выбора источника
+        # спрашиваем язык, источник (игра/приложение) и стартовое слово диапазона
+        chosen = self._ask_export_options()
+        if chosen is None:               # отмена в диалоге
             return
-        ids = None
-        if src:                          # пустая строка == «Все источники»
-            ids = [e["id"] for e in WORDS.items if _src_key(e) == src]
-            if not ids:
-                return
+        lang, src, since = chosen        # пустые == «все»; since==0 — все слова
 
-        suffix = "_" + _pretty_src(src).replace(" ", "_") if src else ""
+        sel = [e for e in WORDS.items
+               if (not lang or e.get("src_lang") == lang)
+               and (not src or _src_key(e) == src)
+               and e.get("created", 0) >= since]
+        # ids=None означает «всё» — отдаём только когда реально нет фильтра
+        ids = None if (not lang and not src and since <= 0) else [e["id"] for e in sel]
+        if ids is not None and not ids:
+            return
+
+        suffix = ""
+        if lang:
+            suffix += "_" + lang
+        if src:
+            suffix += "_" + _pretty_src(src).replace(" ", "_")
         path, _ = QFileDialog.getSaveFileName(
             self, t("Экспорт слов"), f"wordsnap{suffix}_anki.txt",
             "Anki (*.txt);;CSV (*.csv);;JSON (*.json)")
         if path:
             WORDS.export(path, ids)
 
-    def _ask_export_source(self) -> str | None:
-        """Диалог выбора источника для экспорта. Возвращает ключ источника,
-        "" для всех источников или None, если пользователь отменил."""
+    def _ask_export_options(self) -> tuple[str, str, float] | None:
+        """Диалог экспорта: язык + источник + слово, с которого брать (до самого нового).
+        Возвращает (язык, ключ источника, метку времени старта) или None при отмене.
+        Пустые строки — «все языки/источники»; метка 0.0 — все слова."""
+        langs, seen = [], set()
+        for e in WORDS.items:
+            lg = e.get("src_lang")
+            if lg and lg not in seen:
+                seen.add(lg); langs.append(lg)
         srcs, seen = [], set()
         for e in WORDS.items:
             s = _src_key(e)
@@ -759,24 +774,65 @@ class WordsPage(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle(t("Экспорт слов"))
         lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(20, 18, 20, 16); lay.setSpacing(12)
-        lay.addWidget(QLabel(t("Источник для экспорта:")))
+        lay.setContentsMargins(20, 18, 20, 16); lay.setSpacing(8)
+        dlg.setMinimumWidth(360)
 
-        combo = QComboBox()
-        combo.addItem(svg_icon("filter.svg", ICON, 16), t("  Все источники"), "")
+        lay.addWidget(QLabel(t("Язык для экспорта:")))
+        lang_combo = QComboBox()
+        lang_combo.addItem(svg_icon("globe.svg", ICON, 16), t("  Все языки"), "")
+        for lg in langs:
+            lang_combo.addItem(flag_icon(lg), f"  {lang_name(lg)}", lg)
+        cl = self.lang_filter.currentData() if hasattr(self, "lang_filter") else ""
+        i = lang_combo.findData(cl)
+        lang_combo.setCurrentIndex(i if i >= 0 else 0)
+        lay.addWidget(lang_combo)
+
+        lay.addSpacing(6)
+        lay.addWidget(QLabel(t("Источник для экспорта:")))
+        src_combo = QComboBox()
+        src_combo.addItem(svg_icon("filter.svg", ICON, 16), t("  Все источники"), "")
         for s in srcs:
-            combo.addItem(_pretty_src(s), s)
-        # по умолчанию подставляем источник, выбранный сейчас в фильтре списка
+            src_combo.addItem(_pretty_src(s), s)
         cur = self.source_filter.currentData() if hasattr(self, "source_filter") else ""
-        idx = combo.findData(cur)
-        combo.setCurrentIndex(idx if idx >= 0 else 0)
-        lay.addWidget(combo)
+        idx = src_combo.findData(cur)
+        src_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        lay.addWidget(src_combo)
+
+        lay.addSpacing(6)
+        lay.addWidget(QLabel(t("Начиная со слова (до самого нового):")))
+        from_combo = QComboBox()
+        lay.addWidget(from_combo)
+
+        def fill_words():
+            lg = lang_combo.currentData()
+            src = src_combo.currentData()
+            words = [e for e in WORDS.items
+                     if (not lg or e.get("src_lang") == lg)
+                     and (not src or _src_key(e) == src)]
+            words.sort(key=lambda e: e.get("created", 0))      # от старых к новым
+            from_combo.blockSignals(True)
+            from_combo.clear()
+            from_combo.addItem(t("  Все слова"), 0.0)
+            for e in words:
+                ts = e.get("created", 0)
+                label = e.get("dict_form") or e.get("word_in_text") or "—"
+                if ts:
+                    label = f"{label}   ·   {datetime.date.fromtimestamp(ts).strftime('%d.%m.%Y')}"
+                from_combo.addItem(label, float(ts or 0.0))
+            from_combo.setCurrentIndex(0)
+            from_combo.blockSignals(False)
+
+        lang_combo.currentIndexChanged.connect(fill_words)
+        src_combo.currentIndexChanged.connect(fill_words)
+        fill_words()
 
         box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         box.accepted.connect(dlg.accept)
         box.rejected.connect(dlg.reject)
+        lay.addSpacing(6)
         lay.addWidget(box)
 
         if dlg.exec() != QDialog.Accepted:
             return None
-        return combo.currentData()
+        return (lang_combo.currentData(), src_combo.currentData(),
+                float(from_combo.currentData() or 0.0))
