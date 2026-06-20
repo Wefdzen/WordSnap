@@ -80,6 +80,7 @@ class Controller(QObject):
         self.hotkeys.triggered.connect(self.on_hotkey)
         self.hotkeys.escaped.connect(self.on_escape)
         self.window.settings_page.hotkeys_changed.connect(self.hotkeys.restart)
+        self.window.settings_page.words_display_changed.connect(self.window.words_page.reload)
         self.window.words_page.fetch_missing.connect(self.fetch_missing)
         self.popup.bookmark_clicked.connect(self.save_pending_entry)
         self.popup.closed.connect(self.close_highlight)

@@ -41,6 +41,7 @@ DEFAULTS = {
     # --- Слова ---
     "auto_save_words": True,
     "auto_crop_screenshots": False,
+    "show_duplicate_badge": True,    # значок-метка у слов, которые встречаются не раз
     # --- Переводчик и словари ---
     "sources_order": ["translator_pro", "looktionary_pro", "oxford"],
     "sources_enabled": {"translator_pro": True, "looktionary_pro": True, "oxford": True},

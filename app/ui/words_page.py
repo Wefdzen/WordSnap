@@ -77,6 +77,11 @@ def _src_key(e: dict) -> str:
         return b
     return (e.get("source_title") or e.get("source_app") or "").strip()
 
+def _dup_key(e: dict) -> tuple:
+    """Ключ для поиска повторов: язык + начальная форма слова (без регистра)."""
+    word = (e.get("dict_form") or e.get("word_in_text") or "").strip().lower()
+    return (e.get("src_lang", ""), word)
+
 def _pretty_src(s: str) -> str:
     """Красивое имя источника: убираем путь и расширение .exe (если это имя
     процесса), полное название игры/браузера оставляем как есть."""
@@ -155,7 +160,7 @@ class ScalableImage(QLabel):
 
 class WordRow(QFrame):
     clicked = Signal(str, bool)  # (entry_id, ctrl_held)
-    def __init__(self, entry: dict, parent=None):
+    def __init__(self, entry: dict, dup_count: int = 0, parent=None):
         super().__init__(parent)
         self.entry_id = entry["id"]
         self.setObjectName("WordRow")
@@ -188,6 +193,12 @@ class WordRow(QFrame):
         if entry.get("favorite"):
             star = QLabel("★"); star.setStyleSheet("color: #f5c542; font-size: 13px;")
             top.addWidget(star)
+        # метка «такое слово уже есть» — пользователь сам решит, что делать с повтором
+        if dup_count > 1:
+            dup = QLabel()
+            dup.setPixmap(svg_icon("layers.svg", "#e0a23a", 14).pixmap(14, 14))
+            dup.setToolTip(t("Это слово уже есть в словаре") + f" ({dup_count})")
+            top.addWidget(dup)
         top.addStretch(1)
         col.addLayout(top)
         if entry.get("word_translation"):
@@ -469,6 +480,13 @@ class WordsPage(QWidget):
         if sort_by == "level":  # по уровню (A1→C2), внутри уровня — новые сверху
             items.sort(key=lambda e: (_cefr_rank(e), -e.get("created", 0)))
 
+        # считаем повторы по всему словарю (язык + начальная форма слова),
+        # чтобы метку видеть даже когда дубликаты разнесены фильтром/сортировкой
+        dup_counts: dict = {}
+        if CONFIG.get("show_duplicate_badge", True):
+            for e in WORDS.items:
+                dup_counts[_dup_key(e)] = dup_counts.get(_dup_key(e), 0) + 1
+
         last_group = None
         insert_at = 0
         for e in items:
@@ -479,7 +497,7 @@ class WordsPage(QWidget):
                 self.list_lay.insertWidget(insert_at, lbl); insert_at += 1
                 hl = Hairline(); self.list_lay.insertWidget(insert_at, hl); insert_at += 1
                 last_group = group
-            row = WordRow(e)
+            row = WordRow(e, dup_count=dup_counts.get(_dup_key(e), 0))
             row.clicked.connect(self.select_entry)
             self.list_lay.insertWidget(insert_at, row); insert_at += 1
             self._rows[e["id"]] = row

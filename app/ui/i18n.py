@@ -87,6 +87,9 @@ _EN = {
     "Автообрезка скриншотов": "Auto-crop screenshots",
     "Автоматически обрезать скриншоты, оставляя только текст вокруг слова.":
         "Automatically crop screenshots to keep only the text around the word.",
+    "Помечать повторяющиеся слова": "Mark duplicate words",
+    "Показывать значок у слов, которые уже есть в словаре.":
+        "Show an icon next to words that are already in the dictionary.",
 
     # --- настройки: ИИ ---
     "Провайдер": "Provider",
@@ -130,6 +133,7 @@ _EN = {
         "Saved words will appear here.\nPress the hotkey over a word on the screen.",
     "Найдено в": "Found in",
     "Открыть скриншот": "Open screenshot",
+    "Это слово уже есть в словаре": "This word is already in the dictionary",
     # статистика / сортировка / фильтры / теги / избранное
     "Всего": "Total",
     "Всего слов": "Total words",

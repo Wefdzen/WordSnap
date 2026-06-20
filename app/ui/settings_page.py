@@ -19,6 +19,7 @@ def section(title: str) -> QLabel:
 
 class SettingsPage(QWidget):
     hotkeys_changed = Signal()
+    words_display_changed = Signal()      # изменились настройки отображения списка слов
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -155,6 +156,11 @@ class SettingsPage(QWidget):
         v.addWidget(SettingRow("scissors.svg", t("Автообрезка скриншотов"),
                                t("Автоматически обрезать скриншоты, оставляя только текст вокруг "
                                  "слова."), sw4))
+        sw5 = ToggleSwitch(CONFIG.get("show_duplicate_badge"))
+        sw5.toggled.connect(lambda on: (CONFIG.set("show_duplicate_badge", on),
+                                        self.words_display_changed.emit()))
+        v.addWidget(SettingRow("layers.svg", t("Помечать повторяющиеся слова"),
+                               t("Показывать значок у слов, которые уже есть в словаре."), sw5))
 
         # ================= ИИ-источники =================
         v.addWidget(section(t("ИИ-источники")))
