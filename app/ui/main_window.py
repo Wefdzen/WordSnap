@@ -174,7 +174,7 @@ class TitleBar(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Lookupper")
+        self.setWindowTitle("WordSnap")
         self._is_max = False
         self.setWindowIcon(make_app_icon())
         self.setWindowFlag(Qt.FramelessWindowHint)

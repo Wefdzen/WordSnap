@@ -7,7 +7,7 @@ import sys
 import threading
 import traceback
 
-from PySide6.QtCore import QObject, Signal, Qt, QRect, QPoint
+from PySide6.QtCore import QObject, Signal, Qt, QRect, QPoint, QTimer
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
@@ -15,24 +15,25 @@ from app.config import CONFIG
 from app.storage import WORDS
 from app import capture, ocr
 from app.gemini import get_ai, GeminiError
-from app.translator import oxford_slot_lookup
-from app.hotkeys import HotkeyManager
+from app.hotkeys import HotkeyManager, parse_hotkey
 from app.ui.main_window import MainWindow, make_app_icon
 from app.ui.popup import DictionaryPopup
-from app.ui.overlay import TranslationOverlay, WordHighlight
+from app.ui.overlay import TranslationOverlay, WordHighlight, FreezeFrameOverlay
 from app.ui.i18n import t
 
 # Сообщение ИИ-источников, когда не задан API-ключ провайдера.
 NO_KEY_MSG = "Добавьте API-ключ в Настройках → ИИ-источники."
 
-def active_window_title() -> tuple[str, str]:
-    """(имя процесса, заголовок активного окна) — для контекста ИИ и «Детали источника»."""
+def active_window_title() -> tuple[str, str, int, int]:
+    """(имя процесса, заголовок активного окна, pid, hwnd) — для контекста ИИ, автопаузы и разворачивания."""
     if sys.platform != "win32":
-        return "", ""
+        return "", "", 0, 0
     try:
         import ctypes
         import ctypes.wintypes as wt
         hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if not hwnd:
+            return "", "", 0, 0
         length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
         buf = ctypes.create_unicode_buffer(length + 1)
         ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
@@ -47,19 +48,22 @@ def active_window_title() -> tuple[str, str]:
             if ctypes.windll.kernel32.QueryFullProcessImageNameW(h, 0, nbuf, ctypes.byref(size)):
                 name = nbuf.value.split("\\")[-1]
             ctypes.windll.kernel32.CloseHandle(h)
-        return name, title
+        return name, title, int(pid.value), int(hwnd)
     except Exception:
-        return "", ""
+        return "", "", 0, 0
 
 class Bridge(QObject):
     """Проброс результатов фоновых потоков в GUI-поток."""
     translator_ready = Signal(str)
     looktionary_ready = Signal(dict)
-    oxford_ready = Signal(object)
+    offline_dict_ready = Signal(str, object)
     source_failed = Signal(str, str)
     overlay_ready = Signal(dict, list, object)
     highlight_ready = Signal(int, int, int, int)
     words_changed = Signal()
+    anki_status = Signal(str, str)
+    anki_visible = Signal(bool)
+    bookmark_saved = Signal(bool)
     error = Signal(str)
     outside_click = Signal(int, int)      # глобальный клик мимо попапа — закрыть его
 
@@ -70,35 +74,60 @@ class Controller(QObject):
         self.window = MainWindow()
         self.popup = DictionaryPopup()
         self.overlay: TranslationOverlay | None = None
+        self.freeze_overlay: FreezeFrameOverlay | None = None
+        self._freeze_full_shot = None
         self.word_highlight: WordHighlight | None = None
         self.bridge = Bridge()
         self.hotkeys = HotkeyManager(CONFIG)
         self._pending_entry: dict | None = None
         self._busy = False
         self._popup_open = False          # попап открыт → ловим клики мимо него
+        self._anki_connected = False
 
         self.hotkeys.triggered.connect(self.on_hotkey)
         self.hotkeys.escaped.connect(self.on_escape)
         self.window.settings_page.hotkeys_changed.connect(self.hotkeys.restart)
         self.window.settings_page.words_display_changed.connect(self.window.words_page.reload)
+        self.window.settings_page.anki_settings_changed.connect(self._on_anki_settings_changed)
         self.window.words_page.fetch_missing.connect(self.fetch_missing)
-        self.popup.bookmark_clicked.connect(self.save_pending_entry)
+        self.popup.bookmark_clicked.connect(self.toggle_pending_bookmark)
+        self.popup.anki_clicked.connect(self.add_current_to_anki)
         self.popup.closed.connect(self.close_highlight)
         self.popup.closed.connect(self._on_popup_closed)
         self.bridge.outside_click.connect(self._on_outside_click)
 
         self.bridge.translator_ready.connect(self.popup.fill_translator)
         self.bridge.looktionary_ready.connect(self._on_looktionary)
-        self.bridge.oxford_ready.connect(self.popup.fill_oxford)
+        self.bridge.offline_dict_ready.connect(self.popup.fill_offline_dict)
         self.bridge.source_failed.connect(self.popup.fail_source)
         self.bridge.overlay_ready.connect(self.show_overlay)
         self.bridge.highlight_ready.connect(self.show_highlight)
         self.bridge.words_changed.connect(self.window.words_page.reload)
+        self.bridge.anki_status.connect(self.popup.set_anki_state)
+        self.bridge.anki_visible.connect(self.popup.set_anki_visible)
+        self.bridge.bookmark_saved.connect(self.popup.set_bookmark_saved)
 
         self._tray()
         self.hotkeys.start()
         self._start_click_watch()
+        self._check_anki_connection_async()
+        if not CONFIG.get("first_setup_done"):
+            from app.ui.onboarding_dialog import OnboardingWizard
+            self.onboarding = OnboardingWizard(self.window)
+            self.onboarding.finished.connect(self._on_onboarding_finished)
+            self.onboarding.show()
+        else:
+            self.window.show()
+
+    def _on_onboarding_finished(self):
+        CONFIG.set("first_setup_done", True, save=True)
+        theme = CONFIG.get("ui_theme", "dark")
+        from app.ui.theme import P, resolve, apply_theme_live
+        if P != resolve(theme):
+            apply_theme_live(self.app, theme)
         self.window.show()
+        self.window.raise_()
+        self.window.activateWindow()
 
     # ------------------------------------- закрытие попапа кликом мимо него
     def _start_click_watch(self):
@@ -124,9 +153,85 @@ class Controller(QObject):
         self._popup_open = False
         self.popup.close_animated()
         self.close_highlight()
+        self._resume_paused_process()
+
+    def _discard_pending_screenshot(self):
+        """Удаляет временный скриншот с диска, если слово не было сохранено в личную библиотеку."""
+        if not self._pending_entry:
+            return
+        # Если слово сохранено в личную библиотеку — скриншот нужен для карточки
+        if self._pending_entry.get("id"):
+            return
+        # Если прямо сейчас идёт отправка в Anki — удалим скриншот после завершения загрузки
+        if self._pending_entry.get("anki_in_progress"):
+            self._pending_entry["pending_delete_shot"] = True
+            return
+
+        shot = self._pending_entry.get("screenshot")
+        if shot:
+            WORDS.delete_screenshot(shot)
+            self._pending_entry["screenshot"] = ""
 
     def _on_popup_closed(self):
         self._popup_open = False
+        self._resume_paused_process()
+        self._discard_pending_screenshot()
+        if self._pending_entry and not self._pending_entry.get("id") and not self._pending_entry.get("anki_in_progress"):
+            self._pending_entry = None
+
+    def _check_autopause(self, app_name: str, win_title: str, pid: int):
+        """Автоматическая пауза игры/приложения через NtSuspendProcess, если настроено."""
+        target = (CONFIG.get("autopause_window") or "").strip().lower()
+        if not target or not pid or sys.platform != "win32":
+            return
+        if target in (app_name or "").lower() or target in (win_title or "").lower():
+            try:
+                import ctypes
+                # PROCESS_SUSPEND_RESUME = 0x0800
+                h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
+                if h:
+                    ctypes.windll.ntdll.NtSuspendProcess(h)
+                    self._paused_process_handle = h
+            except Exception as e:
+                print("autopause suspend error:", e)
+
+    def _resume_paused_process(self):
+        """Возобновление работы приостановленного процесса."""
+        h = getattr(self, "_paused_process_handle", None)
+        if h:
+            try:
+                import ctypes
+                ctypes.windll.ntdll.NtResumeProcess(h)
+                ctypes.windll.kernel32.CloseHandle(h)
+            except Exception as e:
+                print("autopause resume error:", e)
+            finally:
+                self._paused_process_handle = None
+
+    def _check_fullscreenize(self, app_name: str, win_title: str, hwnd: int):
+        """Растягивание окна без рамок на весь экран, если совпадает с настройкой."""
+        target = (CONFIG.get("fullscreenize_window") or "").strip().lower()
+        if not target or not hwnd or sys.platform != "win32":
+            return
+        if target in (app_name or "").lower() or target in (win_title or "").lower():
+            try:
+                import ctypes
+                GWL_STYLE = -16
+                WS_CAPTION = 0x00C00000
+                WS_THICKFRAME = 0x00040000
+                WS_MINIMIZEBOX = 0x00020000
+                WS_MAXIMIZEBOX = 0x00010000
+                WS_SYSMENU = 0x00080000
+                SWP_FRAMECHANGED = 0x0020
+                SWP_SHOWWINDOW = 0x0040
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+                style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+                w = ctypes.windll.user32.GetSystemMetrics(0)
+                h = ctypes.windll.user32.GetSystemMetrics(1)
+                ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW)
+            except Exception as e:
+                print("fullscreenize error:", e)
 
     # ------------------------------------------------------------- трей
     def _tray(self):
@@ -142,7 +247,7 @@ class Controller(QObject):
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(t("Выход")).triggered.connect(self.app.quit)
         self.tray.setContextMenu(self.tray_menu)
-        self.tray.setToolTip(t("Lookupper — экранный переводчик"))
+        self.tray.setToolTip(t("WordSnap — экранный переводчик и словарь"))
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
 
@@ -164,14 +269,38 @@ class Controller(QObject):
 
     # --------------------------------------------------------- горячая клавиша
     def on_hotkey(self, x: int, y: int):
+        if self.freeze_overlay and self.freeze_overlay.isVisible():
+            self.freeze_overlay.close()
+            self.freeze_overlay = None
+            self._resume_paused_process()
+            return
         if self.overlay and self.overlay.isVisible():
             self.overlay.close()
             self.overlay = None
+            self._resume_paused_process()
             return
         if self._busy:
             return
-        if CONFIG.get("mode") == "translator":
+
+        mode = CONFIG.get("mode", "dictionary")
+        # Если режим переводчика, но зажат Shift/Ctrl (или Alt, если он не входит в сам хоткей) — режим словаря
+        is_alt = self.hotkeys.is_alt_down()
+        is_shift = self.hotkeys.is_shift_down()
+        is_ctrl = self.hotkeys.is_ctrl_down()
+        req_mods, _ = parse_hotkey(CONFIG.get("hotkey", "alt+q"))
+        extra_mod = ((is_alt and "alt" not in req_mods) or
+                     (is_shift and "shift" not in req_mods) or
+                     (is_ctrl and "ctrl" not in req_mods))
+        if mode == "translator" and extra_mod:
+            self._dispatch_dictionary_mode(x, y)
+        elif mode == "translator":
             self.run_translator_mode(x, y)
+        else:
+            self._dispatch_dictionary_mode(x, y)
+
+    def _dispatch_dictionary_mode(self, x: int, y: int):
+        if CONFIG.get("freeze_screen"):
+            self.run_freeze_dictionary_mode(x, y)
         else:
             self.run_dictionary_mode(x, y)
 
@@ -180,15 +309,89 @@ class Controller(QObject):
         self._popup_open = False
         if self.popup.isVisible():
             self.popup.close_animated()      # окно сжимается и гаснет (не мгновенно)
+        if self.freeze_overlay and self.freeze_overlay.isVisible():
+            self.freeze_overlay.close()
+            self.freeze_overlay = None
         if self.overlay and self.overlay.isVisible():
             self.overlay.close()
             self.overlay = None
         self.close_highlight()
+        self._resume_paused_process()
 
     # ============================ РЕЖИМ СЛОВАРЯ ============================
+    def run_freeze_dictionary_mode(self, x: int, y: int):
+        """Режим «Заморозка экрана + Свободный курсор» для игр без видимого курсора."""
+        self.close_highlight()
+        app_name, win_title, pid, hwnd = active_window_title()
+        self._check_autopause(app_name, win_title, pid)
+        self._check_fullscreenize(app_name, win_title, hwnd)
+
+        try:
+            img, mon = capture.grab_monitor_at(x, y)
+        except Exception as e:
+            self.bridge.error.emit(str(e))
+            self._resume_paused_process()
+            return
+
+        self._freeze_full_shot = img
+        self.freeze_overlay = FreezeFrameOverlay(
+            img, mon,
+            on_word_clicked=lambda w, s, sx, sy, ww, wh: self._on_freeze_word_clicked(w, s, sx, sy, ww, wh, app_name, win_title),
+            on_close=self._on_freeze_closed
+        )
+        self.freeze_overlay.show()
+        self.freeze_overlay.raise_()
+        self.freeze_overlay.activateWindow()
+
+    def _on_freeze_closed(self):
+        self.freeze_overlay = None
+        if self.popup.isVisible():
+            self.popup.close_animated()
+        self._resume_paused_process()
+
+    def _on_freeze_word_clicked(self, w_clean: str, sentence: str, sx: int, sy: int, w: int, h: int, app_name: str, win_title: str):
+        if not w_clean:
+            return
+
+        shot_name = WORDS.save_screenshot(self._freeze_full_shot)
+        self._pending_entry = {
+            "src_lang": CONFIG.get("ocr_lang"),
+            "dst_lang": CONFIG.get("looktionary_pro")["word_trans_lang"],
+            "dict_form": w_clean, "word_in_text": w_clean,
+            "context": sentence, "screenshot": shot_name,
+            "source_app": app_name, "source_title": win_title,
+            "complete": False,
+        }
+        existing_word = WORDS.find_by_word(w_clean)
+        if existing_word:
+            self._pending_entry["id"] = existing_word["id"]
+            self.bridge.bookmark_saved.emit(True)
+        elif CONFIG.get("auto_save_words", False):
+            self._pending_entry = WORDS.add(self._pending_entry)
+            self.bridge.words_changed.emit()
+            self.bridge.bookmark_saved.emit(True)
+        else:
+            self.bridge.bookmark_saved.emit(False)
+
+        anki_enabled = CONFIG.get("anki_enabled", False)
+        self.popup.set_anki_visible(anki_enabled)
+        if anki_enabled:
+            self.popup.set_anki_state("idle" if self._anki_connected else "disconnected")
+            self._check_anki_connection_async(word_to_check=w_clean)
+
+        order = [k for k in CONFIG.get("sources_order") if CONFIG.get("sources_enabled").get(k)]
+        self.popup.open_at(sx + w // 2, sy + h, order, light=False)
+        self.popup.raise_()
+        self.popup.activateWindow()
+        self._popup_open = True
+
+        self._start_lookup_jobs(w_clean, sentence, app_name, order)
+
     def run_dictionary_mode(self, x: int, y: int):
         self.close_highlight()
-        app_name, win_title = active_window_title()
+        app_name, win_title, pid, hwnd = active_window_title()
+        self._check_autopause(app_name, win_title, pid)
+        self._check_fullscreenize(app_name, win_title, hwnd)
         # 1) скриншот области вокруг курсора (экран «замораживается» в момент нажатия)
         try:
             img, left, top = capture.region_around(x, y)
@@ -223,7 +426,13 @@ class Controller(QObject):
                 line, word = ocr.word_at_point(lines, x - left, y - top)
                 if word is None:
                     for k in order:
-                        self.bridge.source_failed.emit(k, "Под курсором не найден текст.")
+                        self.bridge.source_failed.emit(k, t("Под курсором не найден текст."))
+                    if sys.platform == "win32":
+                        self.tray.showMessage(
+                            "WordSnap",
+                            t("Под курсором нет текста. Для игр без курсора включите «Заморозка экрана» в Настройках."),
+                            QSystemTrayIcon.Information, 2500
+                        )
                     return
                 # подсветка найденного слова прямо на экране (экранные координаты)
                 self.bridge.highlight_ready.emit(
@@ -231,6 +440,9 @@ class Controller(QObject):
                     int(word.w), int(word.h))
                 w_clean = ocr.clean_word(word.text)
                 sentence = ocr.sentence_around(lines, line, word)
+
+                # Если предыдущее слово не сохраняли в библиотеку — удаляем старый скриншот
+                self._discard_pending_screenshot()
 
                 # скриншот для карточки слова
                 if CONFIG.get("auto_crop_screenshots"):
@@ -252,61 +464,93 @@ class Controller(QObject):
                     "source_app": app_name, "source_title": win_title,
                     "complete": False,
                 }
-                if CONFIG.get("auto_save_words"):
+                # Личный словарь: автосохранение или проверка наличия
+                existing_word = WORDS.find_by_word(w_clean)
+                if existing_word:
+                    self._pending_entry["id"] = existing_word["id"]
+                    self.bridge.bookmark_saved.emit(True)
+                elif CONFIG.get("auto_save_words", False):
                     self._pending_entry = WORDS.add(self._pending_entry)
                     self.bridge.words_changed.emit()
+                    self.bridge.bookmark_saved.emit(True)
+                else:
+                    self.bridge.bookmark_saved.emit(False)
 
-                gem = get_ai(CONFIG)
+                # Anki: если интеграция включена — кнопка видна в попапе
+                anki_enabled = CONFIG.get("anki_enabled", False)
+                self.popup.set_anki_visible(anki_enabled)
+                if anki_enabled:
+                    if self._anki_connected:
+                        self.popup.set_anki_state("idle")
+                    else:
+                        self.popup.set_anki_state("disconnected", t("Проверка подключения к AnkiConnect..."))
+                    self._check_anki_connection_async(word_to_check=w_clean)
 
-                # --- Переводчик ---
-                def do_translator():
-                    try:
-                        if not gem.ready:
-                            self.bridge.source_failed.emit("translator_pro", t(NO_KEY_MSG))
-                            return
-                        tgt = CONFIG.get("translator_pro")["target_lang"]
-                        tr = gem.translate_sentence(sentence, tgt, w_clean, app_name)
-                        self.bridge.translator_ready.emit(tr)
-                    except Exception as e:
-                        self.bridge.source_failed.emit("translator_pro", f"Ошибка: {e}")
-
-                # --- Looktionary ---
-                def do_looktionary():
-                    try:
-                        if not gem.ready:
-                            self.bridge.source_failed.emit("looktionary_pro", t(NO_KEY_MSG))
-                            return
-                        lk = CONFIG.get("looktionary_pro")
-                        data = gem.lookup_word(w_clean, sentence, lk["def_lang"],
-                                               lk["word_trans_lang"], app_name)
-                        self.bridge.looktionary_ready.emit(data)
-                    except Exception as e:
-                        self.bridge.source_failed.emit("looktionary_pro", f"Ошибка: {e}")
-
-                # --- Oxford-слот ---
-                def do_oxford():
-                    try:
-                        self.bridge.oxford_ready.emit(oxford_slot_lookup(w_clean))
-                    except Exception as e:
-                        self.bridge.source_failed.emit("oxford", f"Ошибка: {e}")
-
-                # запускаем все источники ОДНОВРЕМЕННО — каждый присылает результат сам по себе
-                jobs = {"translator_pro": do_translator,
-                        "looktionary_pro": do_looktionary, "oxford": do_oxford}
-                threads = [threading.Thread(target=jobs[k], daemon=True)
-                           for k in order if k in jobs]
-                for th in threads:
-                    th.start()
-                for th in threads:
-                    th.join()
+                self._start_lookup_jobs(w_clean, sentence, app_name, order)
             except Exception as e:
                 traceback.print_exc()
                 for k in order:
-                    self.bridge.source_failed.emit(k, f"OCR-ошибка: {e}")
+                    self.bridge.source_failed.emit(k, f"{t('OCR-ошибка')}: {e}")
             finally:
                 self._busy = False
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _start_lookup_jobs(self, w_clean: str, sentence: str, app_name: str, order: list[str]):
+        """Запуск асинхронных задач получения перевода и словарных статей."""
+        gem = get_ai(CONFIG)
+
+        # --- Переводчик ---
+        def do_translator():
+            try:
+                if not gem.ready:
+                    self.bridge.source_failed.emit("translator_pro", t(NO_KEY_MSG))
+                    return
+                tgt = CONFIG.get("translator_pro")["target_lang"]
+                tr = gem.translate_sentence(sentence, tgt, w_clean, app_name)
+                self.bridge.translator_ready.emit(tr)
+            except Exception as e:
+                self.bridge.source_failed.emit("translator_pro", f"{t('Ошибка')}: {e}")
+
+        # --- Looktionary ---
+        def do_looktionary():
+            try:
+                if not gem.ready:
+                    self.bridge.source_failed.emit("looktionary_pro", t(NO_KEY_MSG))
+                    return
+                lk = CONFIG.get("looktionary_pro")
+                data = gem.lookup_word(w_clean, sentence, lk["def_lang"],
+                                       lk["word_trans_lang"], app_name)
+                self.bridge.looktionary_ready.emit(data)
+            except Exception as e:
+                self.bridge.source_failed.emit("looktionary_pro", f"{t('Ошибка')}: {e}")
+
+        # запускаем все источники ОДНОВРЕМЕННО — каждый присылает результат сам по себе
+        jobs = {"translator_pro": do_translator,
+                "looktionary_pro": do_looktionary}
+
+        from app.dictionaries import DICTIONARIES, normalize_key
+        for k in order:
+            if k not in jobs:
+                def make_offline_job(src_key):
+                    def do_offline():
+                        try:
+                            d_id = normalize_key(src_key)
+                            res = DICTIONARIES.lookup(w_clean, d_id)
+                            self.bridge.offline_dict_ready.emit(src_key, res)
+                            if res and self._pending_entry is not None:
+                                if "offline_entries" not in self._pending_entry:
+                                    self._pending_entry["offline_entries"] = []
+                                self._pending_entry["offline_entries"].extend(res)
+                        except Exception as e:
+                            self.bridge.source_failed.emit(src_key, f"{t('Ошибка')}: {e}")
+                    return do_offline
+                jobs[k] = make_offline_job(k)
+
+        threads = [threading.Thread(target=jobs[k], daemon=True)
+                   for k in order if k in jobs]
+        for th in threads:
+            th.start()
 
     def _on_looktionary(self, data: dict):
         self.popup.fill_looktionary(data)
@@ -322,16 +566,116 @@ class Controller(QObject):
                          word_translation=data.get("word_translation", ""),
                          synonyms=data.get("synonyms", []),
                          context_translation=data.get("context_translation", ""),
-                         complete=bool(data.get("definition")))
+                         complete=bool(data.get("definition") or data.get("word_translation")))
             self.bridge.words_changed.emit()
         elif self._pending_entry is not None:
             self._pending_entry.update(data)
+            if data.get("definition") or data.get("word_translation"):
+                self._pending_entry["complete"] = True
+
+    def toggle_pending_bookmark(self):
+        """Клик по кнопке закладки (🔖 / ✅) в попапе."""
+        if not self._pending_entry:
+            return
+        entry_id = self._pending_entry.get("id")
+        if entry_id:
+            WORDS.delete([entry_id])
+            self._pending_entry.pop("id", None)
+            self.popup.set_bookmark_saved(False)
+            self.bridge.words_changed.emit()
+        else:
+            if self._pending_entry.get("definition") or self._pending_entry.get("word_translation"):
+                self._pending_entry["complete"] = True
+            self._pending_entry = WORDS.add(self._pending_entry)
+            self.popup.set_bookmark_saved(True)
+            self.bridge.words_changed.emit()
 
     def save_pending_entry(self):
-        """Клик по закладке в попапе, когда автосохранение выключено."""
-        if self._pending_entry and not self._pending_entry.get("id"):
-            self._pending_entry = WORDS.add(self._pending_entry)
-            self.bridge.words_changed.emit()
+        """Сохранение текущего слова (обратная совместимость)."""
+        self.toggle_pending_bookmark()
+
+    def _check_anki_connection_async(self, word_to_check: str = ""):
+        """Фоновая проверка связи с AnkiConnect. Если включено — кнопка в попапе всегда отображается."""
+        def task():
+            enabled = CONFIG.get("anki_enabled", False)
+            self.bridge.anki_visible.emit(enabled)
+            if not enabled:
+                self._anki_connected = False
+                return
+
+            try:
+                from app.anki import get_anki_client
+                client = get_anki_client()
+                ok, msg = client.check_connection(timeout=2.5)
+                self._anki_connected = ok
+                try:
+                    if ok:
+                        deck = CONFIG.get("anki_deck")
+                        if word_to_check and deck and client.check_note_exists(deck, word_to_check):
+                            self.bridge.anki_status.emit("exists", t("Слово уже есть в Anki"))
+                        else:
+                            self.bridge.anki_status.emit("idle", "")
+                    else:
+                        self.bridge.anki_status.emit("disconnected", msg)
+                except (RuntimeError, Exception):
+                    pass
+            except Exception as e:
+                self._anki_connected = False
+                try:
+                    self.bridge.anki_status.emit("disconnected", str(e))
+                except (RuntimeError, Exception):
+                    pass
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def add_current_to_anki(self):
+        """Добавление текущего слова из попапа в Anki через AnkiConnect."""
+        if not self._pending_entry:
+            self.popup.set_anki_state("error", t("Нет данных слова"))
+            return
+
+        entry = self._pending_entry
+        entry["anki_in_progress"] = True
+
+        def worker():
+            try:
+                import time
+                for _ in range(15):
+                    if (entry.get("complete")
+                            or entry.get("definition")
+                            or entry.get("offline_entries")):
+                        break
+                    time.sleep(0.1)
+
+                from app.anki import get_anki_client
+                client = get_anki_client()
+                note_id = client.add_word_note(entry)
+                self.bridge.anki_status.emit("added", f"{t('Добавлено в Anki')} (ID: {note_id})")
+                if entry.get("id"):
+                    WORDS.update(entry["id"], in_anki=True, anki_id=note_id)
+                    self.bridge.words_changed.emit()
+            except Exception as e:
+                msg = str(e)
+                if "подключиться" in msg.lower() or "connection" in msg.lower():
+                    self._anki_connected = False
+                    self.bridge.anki_status.emit("disconnected", msg)
+                elif "duplicate" in msg.lower() or "дубликат" in msg.lower():
+                    self.bridge.anki_status.emit("exists", t("Слово уже есть в Anki"))
+                else:
+                    self.bridge.anki_status.emit("error", msg)
+            finally:
+                entry["anki_in_progress"] = False
+                # Если слово не сохранено в библиотеку и окно закрыто — удаляем локальный скриншот (Anki уже сохранил себе)
+                if not entry.get("id") and (entry.get("pending_delete_shot") or not self._popup_open):
+                    shot = entry.get("screenshot")
+                    if shot:
+                        WORDS.delete_screenshot(shot)
+                        entry["screenshot"] = ""
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_anki_settings_changed(self):
+        self._check_anki_connection_async()
 
     # ----------------------------------------------- подсветка слова на экране
     def show_highlight(self, x: int, y: int, w: int, h: int):
@@ -348,18 +692,31 @@ class Controller(QObject):
 
     # ========================== РЕЖИМ ПЕРЕВОДЧИКА ==========================
     def run_translator_mode(self, x: int, y: int):
-        app_name, _ = active_window_title()
+        app_name, win_title, pid, hwnd = active_window_title()
+        self._check_autopause(app_name, win_title, pid)
+        self._check_fullscreenize(app_name, win_title, hwnd)
+
         try:
             img, mon = capture.grab_monitor_at(x, y)
         except Exception as e:
             self.bridge.error.emit(str(e))
+            self._resume_paused_process()
             return
 
         frozen = None
         if CONFIG.get("freeze_screen"):
-            qimg = QImage(img.tobytes(), img.width, img.height,
-                          img.width * 3, QImage.Format_RGB888)
-            frozen = QPixmap.fromImage(qimg.copy())
+            try:
+                img_rgba = img.convert("RGBA")
+                raw_bytes = img_rgba.tobytes()
+                qimg = QImage(raw_bytes, img.width, img.height,
+                              img.width * 4, QImage.Format_RGBA8888)
+                frozen = QPixmap.fromImage(qimg.copy())
+            except Exception:
+                frozen = None
+
+        # Уведомление в трей о начале распознавания и перевода
+        self.tray.showMessage("WordSnap", t("Распознавание и перевод текста на экране..."),
+                              QSystemTrayIcon.Information, 1500)
 
         def worker():
             self._busy = True
@@ -368,21 +725,25 @@ class Controller(QObject):
                 lines = engine.recognize(img)
                 lines = [l for l in lines if len(l.text.strip()) > 1][:60]
                 if not lines:
-                    self._busy = False
+                    self.bridge.error.emit(t("Текст на экране не обнаружен."))
+                    self._resume_paused_process()
                     return
                 gem = get_ai(CONFIG)
                 if not gem.ready:
                     self.bridge.error.emit(t(NO_KEY_MSG))
-                    self._busy = False
+                    self._resume_paused_process()
                     return
                 texts = [l.text for l in lines]
-                tgt = CONFIG.get("translator_pro")["target_lang"]
+                tp_cfg = CONFIG.get("translator_pro") or {}
+                tgt = tp_cfg.get("target_lang", "ru")
                 translated = gem.translate_lines(texts, tgt, app_name)
                 items = [(QRect(int(l.x), int(l.y), int(l.w), int(l.h)), tr)
                          for l, tr in zip(lines, translated)]
                 self.bridge.overlay_ready.emit(mon, items, frozen)
-            except Exception:
+            except Exception as e:
                 traceback.print_exc()
+                self.bridge.error.emit(f"{t('Ошибка перевода')}: {e}")
+                self._resume_paused_process()
             finally:
                 self._busy = False
 
@@ -401,7 +762,7 @@ class Controller(QObject):
     def fetch_missing(self):
         gem = get_ai(CONFIG)
         if not gem.ready:
-            self.bridge.error.emit("Укажите API-ключ Gemini в Настройках → ИИ-источники.")
+            self.bridge.error.emit(t("Укажите API-ключ Gemini в Настройках → ИИ-источники."))
             return
         items = WORDS.incomplete()
         lk = CONFIG.get("looktionary_pro")
@@ -436,21 +797,29 @@ def main():
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Lookupper.Desktop.App")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("WordSnap.Desktop.App")
         except Exception:
             pass
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Lookupper")
+    app.setApplicationName("WordSnap")
     from app.ui.theme import apply_palette
     apply_palette(app)                  # палитра под выбранную тему (важно для светлой)
     app.setWindowIcon(make_app_icon())  # иконка приложения (панель задач)
     app.setQuitOnLastWindowClosed(False)
     ctl = Controller(app)
-    ctl.bridge.error.connect(lambda m: ctl.tray.showMessage("Lookupper", m,
+    ctl.bridge.error.connect(lambda m: ctl.tray.showMessage("WordSnap", m,
                                                             QSystemTrayIcon.Warning, 4000))
-    sys.exit(app.exec())
+    import signal
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    sig_timer = QTimer()
+    sig_timer.timeout.connect(lambda: None)
+    sig_timer.start(400)
+    try:
+        sys.exit(app.exec())
+    except KeyboardInterrupt:
+        sys.exit(0)
 
 if __name__ == "__main__":
-    print("Starting Lookupper...")
+    print("Starting WordSnap...")
     main()

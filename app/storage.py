@@ -29,11 +29,19 @@ class WordsStore:
     def __init__(self):
         self.items: list[dict] = []
         self.load()
+        self.cleanup_orphaned_screenshots()
 
     def load(self):
         try:
             with open(WORDS_PATH(), "r", encoding="utf-8") as f:
                 self.items = json.load(f)
+            changed = False
+            for it in self.items:
+                if not it.get("complete") and (it.get("definition") or it.get("word_translation")):
+                    it["complete"] = True
+                    changed = True
+            if changed:
+                self.save()
         except FileNotFoundError:
             self.items = []
         except Exception as e:
@@ -47,7 +55,8 @@ class WordsStore:
     def add(self, entry: dict) -> dict:
         entry.setdefault("id", uuid.uuid4().hex)
         entry.setdefault("created", time.time())
-        entry.setdefault("complete", False)
+        is_comp = bool(entry.get("complete") or entry.get("definition") or entry.get("word_translation"))
+        entry["complete"] = is_comp
         entry.setdefault("favorite", False)
         entry.setdefault("tags", [])
         self.items.insert(0, entry)
@@ -75,6 +84,16 @@ class WordsStore:
                 return it
         return None
 
+    def find_by_word(self, word: str) -> dict | None:
+        """Поиск сохранённого слова по словарной форме или форме в тексте."""
+        w = (word or "").strip().lower()
+        if not w:
+            return None
+        for it in self.items:
+            if (it.get("dict_form") or "").strip().lower() == w or (it.get("word_in_text") or "").strip().lower() == w:
+                return it
+        return None
+
     def delete(self, ids: list[str]):
         keep = []
         for it in self.items:
@@ -91,7 +110,7 @@ class WordsStore:
         self.save()
 
     def incomplete(self) -> list[dict]:
-        return [it for it in self.items if not it.get("complete")]
+        return [it for it in self.items if not it.get("complete") and not (it.get("definition") or it.get("word_translation"))]
 
     # ---------- скриншоты ----------
     def save_screenshot(self, pil_image, max_w: int = 1280) -> str:
@@ -106,6 +125,33 @@ class WordsStore:
 
     def screenshot_path(self, name: str) -> str:
         return os.path.join(SHOTS_DIR(), name)
+
+    def delete_screenshot(self, name: str):
+        """Удаляет файл скриншота из папки data/screenshots/."""
+        if not name:
+            return
+        try:
+            p = os.path.join(SHOTS_DIR(), name)
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError:
+            pass
+
+    def cleanup_orphaned_screenshots(self):
+        """Удаляет с диска скриншоты, которые не сохранены ни в одном слове библиотеки."""
+        try:
+            saved = {it.get("screenshot") for it in self.items if it.get("screenshot")}
+            d = SHOTS_DIR()
+            if not os.path.exists(d):
+                return
+            for fname in os.listdir(d):
+                if fname not in saved and (fname.endswith(".jpg") or fname.endswith(".png")):
+                    try:
+                        os.remove(os.path.join(d, fname))
+                    except OSError:
+                        pass
+        except Exception as e:
+            print("cleanup_orphaned_screenshots error:", e)
 
     # ---------- экспорт ----------
     def export(self, path: str, ids: list[str] | None = None):

@@ -149,7 +149,8 @@ class ToggleSwitch(QAbstractButton):
         y0 = (self.height() - h) // 2
         if self.with_label:
             p.setPen(QColor("#ffffff"))
-            f = QFont(self.font()); f.setPixelSize(12)  # пиксели, чтобы не ловить point-size <= 0
+            f = QFont("Segoe UI")
+            f.setPixelSize(12)
             p.setFont(f)
             p.drawText(0, 0, x0 - 10, self.height(), Qt.AlignRight | Qt.AlignVCenter,
                        t("Вкл.") if self.isChecked() else t("Откл."))

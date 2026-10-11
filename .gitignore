@@ -1,9 +1,55 @@
+# Python
 __pycache__/
-*.pyc
-/data/
-/build/
-/dist/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+release/
+release
+installer.iss
 *.spec
-assets/svg/_png/
+*.egg-info/
+
+# Virtual Environments
 .venv/
 venv/
+env/
+ENV/
+
+# User Data, Settings, API Keys and Cache (CRITICAL: never commit personal data or keys)
+data/
+data/settings.json
+data/screenshots/
+data/dictionaries/
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+
+# Environment & Secret files
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.token
+secrets.json
+
+# IDEs and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build artifacts & temp files
+assets/iconTMP.png
+assets/svg/_png/
+*.log
+*.tmp
+scratch/

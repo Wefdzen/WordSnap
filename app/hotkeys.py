@@ -125,3 +125,15 @@ class HotkeyManager(QObject):
     def _fire(self):
         pos = mouse.Controller().position
         self.triggered.emit(int(pos[0]), int(pos[1]))
+
+    def is_alt_down(self) -> bool:
+        """Проверяет, зажат ли Alt в текущий момент."""
+        return "alt" in getattr(self, "_mods_down", set())
+
+    def is_ctrl_down(self) -> bool:
+        """Проверяет, зажат ли Ctrl в текущий момент."""
+        return "ctrl" in getattr(self, "_mods_down", set())
+
+    def is_shift_down(self) -> bool:
+        """Проверяет, зажат ли Shift в текущий момент."""
+        return "shift" in getattr(self, "_mods_down", set())

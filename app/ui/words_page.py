@@ -237,13 +237,15 @@ class WordsPage(QWidget):
         from PySide6.QtWidgets import QApplication
         QApplication.instance().installEventFilter(self)
 
-    # --------------------------------------------------- горячие клавиши
     def eventFilter(self, obj, ev):
-        if (ev.type() == QEvent.KeyPress and self.isVisible()
-                and self.window() and self.window().isActiveWindow()):
-            if self._handle_key(ev):
-                return True
-        return super().eventFilter(obj, ev)
+        try:
+            if (ev.type() == QEvent.KeyPress and self.isVisible()
+                    and self.window() and self.window().isActiveWindow()):
+                if self._handle_key(ev):
+                    return True
+            return super().eventFilter(obj, ev)
+        except KeyboardInterrupt:
+            return False
 
     def _handle_key(self, e) -> bool:
         from PySide6.QtWidgets import QApplication, QLineEdit, QTextEdit, QComboBox
@@ -596,7 +598,19 @@ class WordsPage(QWidget):
         favb.setToolTip(t("В избранное") + "  (Ctrl+D)")
         favb.setStyleSheet("font-size: 18px; color: %s;" % ("#f5c542" if fav_on else TEXT_DIM))
         favb.clicked.connect(lambda: self._toggle_favorite(e["id"]))
-        head.addWidget(favb); head.addStretch(1)
+        head.addWidget(favb)
+
+        if CONFIG.get("anki_enabled"):
+            in_anki = e.get("in_anki", False)
+            ankib = QPushButton("✓ Anki" if in_anki else "＋ Anki")
+            ankib.setObjectName("IconBtn")
+            ankib.setToolTip(t("Карточка уже в Anki") if in_anki else t("Добавить в Anki"))
+            ankib.setStyleSheet("font-size: 13px; font-weight: 600; color: %s; padding: 2px 8px;" %
+                                ("#4caf50" if in_anki else ACCENT))
+            ankib.clicked.connect(lambda _, entry=e, b=ankib: self._add_entry_to_anki(entry, b))
+            head.addWidget(ankib)
+
+        head.addStretch(1)
         L.addLayout(head)
         if e.get("word_translation"):
             sub = QLabel(e["word_translation"]); sub.setAlignment(Qt.AlignCenter)
@@ -665,7 +679,7 @@ class WordsPage(QWidget):
 
         L.addWidget(QLabel(t("Теги (через запятую)")))
         tagf = QLineEdit(", ".join(e.get("tags", [])))
-        tagf.setPlaceholderText("#диалоги, #магия, #важное")
+        tagf.setPlaceholderText(t("#диалоги, #магия, #важное"))
         tagf.editingFinished.connect(lambda: (
             WORDS.update(e["id"], tags=[x.strip().lstrip("#") for x in tagf.text().split(",") if x.strip()]),
             self.reload()))
@@ -746,6 +760,27 @@ class WordsPage(QWidget):
             if self.current_id in ids:
                 self.current_id = None
             self.reload()
+
+    def _add_entry_to_anki(self, entry: dict, btn: QPushButton):
+        btn.setText("⏳")
+        btn.setEnabled(False)
+        def worker():
+            try:
+                from ..anki import get_anki_client
+                client = get_anki_client()
+                note_id = client.add_word_note(entry)
+                WORDS.update(entry["id"], in_anki=True, anki_id=note_id)
+                btn.setText("✓ Anki")
+                btn.setStyleSheet("font-size: 13px; font-weight: 600; color: #4caf50; padding: 2px 8px;")
+                btn.setToolTip(t("Добавлено в Anki") + f" (ID: {note_id})")
+                btn.setEnabled(True)
+            except Exception as ex:
+                btn.setText("⚠")
+                btn.setStyleSheet("font-size: 13px; font-weight: 600; color: #e0564b; padding: 2px 8px;")
+                btn.setToolTip(f"{t('Ошибка Anki')}: {ex}")
+                btn.setEnabled(True)
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
 
     def _export(self):
         # спрашиваем язык, источник (игра/приложение) и стартовое слово диапазона

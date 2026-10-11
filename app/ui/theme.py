@@ -94,7 +94,7 @@ def build_qss(p: dict) -> str:
     color: {p['TEXT']};
     outline: none;
 }}
-QMainWindow, #Root {{ background: {p['BG']}; }}
+QMainWindow, QDialog, #Root {{ background: {p['BG']}; color: {p['TEXT']}; }}
 
 /* ---------- кастомный заголовок ---------- */
 #TitleBar {{ background: {p['BG']}; }}
@@ -185,3 +185,31 @@ QMenu::item:selected {{ background: {p['BG_HOVER']}; }}
 
 
 QSS = build_qss(P)
+
+
+def apply_theme_live(app, theme_name: str):
+    """Применяет выбранную тему ко всему приложению на лету."""
+    global P, IS_LIGHT, ACCENT, ACCENT_HOVER, BG, BG_PANEL, BG_CARD, BG_HOVER, BORDER, TEXT, TEXT_DIM, PRESSED, SCROLL, SCROLL_HOVER, INPUT_LINE, ROW_HOVER, ROW_SEL, ICON, QSS
+    P = resolve(theme_name)
+    IS_LIGHT = P is LIGHT
+    ACCENT = P["ACCENT"]
+    ACCENT_HOVER = P["ACCENT_HOVER"]
+    BG = P["BG"]
+    BG_PANEL = P["BG_PANEL"]
+    BG_CARD = P["BG_CARD"]
+    BG_HOVER = P["BG_HOVER"]
+    BORDER = P["BORDER"]
+    TEXT = P["TEXT"]
+    TEXT_DIM = P["TEXT_DIM"]
+    PRESSED = P["PRESSED"]
+    SCROLL = P["SCROLL"]
+    SCROLL_HOVER = P["SCROLL_HOVER"]
+    INPUT_LINE = P["INPUT_LINE"]
+    ROW_HOVER = P["ROW_HOVER"]
+    ROW_SEL = P["ROW_SEL"]
+    ICON = P["TEXT"]
+    QSS = build_qss(P)
+    if app:
+        apply_palette(app)
+        app.setStyleSheet(QSS)
+

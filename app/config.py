@@ -10,18 +10,62 @@ def app_dir() -> str:
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+def is_dir_writable(path: str) -> bool:
+    try:
+        os.makedirs(path, exist_ok=True)
+        test_file = os.path.join(path, f".test_write_{os.getpid()}")
+        with open(test_file, "w") as f:
+            f.write("1")
+        if os.path.exists(test_file):
+            os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+_DATA_DIR = None
+
 def data_dir() -> str:
-    d = os.path.join(app_dir(), "data")
-    os.makedirs(d, exist_ok=True)
-    os.makedirs(os.path.join(d, "screenshots"), exist_ok=True)
-    return d
+    global _DATA_DIR
+    if _DATA_DIR and os.path.exists(_DATA_DIR):
+        return _DATA_DIR
+
+    local_data = os.path.join(app_dir(), "data")
+    portable_marker = os.path.join(app_dir(), "portable.flag")
+    if os.path.exists(portable_marker) or is_dir_writable(local_data):
+        _DATA_DIR = local_data
+    else:
+        appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+        _DATA_DIR = os.path.join(appdata, "WordSnap", "data")
+
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    os.makedirs(os.path.join(_DATA_DIR, "screenshots"), exist_ok=True)
+    return _DATA_DIR
 
 SETTINGS_PATH = lambda: os.path.join(data_dir(), "settings.json")
+
+def detect_system_lang() -> str:
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0xFF
+            if lang_id in (0x19, 0x22, 0x23):
+                return "ru"
+            return "en"
+        except Exception:
+            pass
+    try:
+        import locale
+        loc = (locale.getlocale()[0] or "").lower()
+        if loc.startswith(("ru", "uk", "be")):
+            return "ru"
+    except Exception:
+        pass
+    return "en"
 
 DEFAULTS = {
     # --- Внешний вид ---
     "ui_theme": "dark",              # "dark" | "light" | "system"
-    "ui_lang": "ru",                 # "ru" | "en" — язык интерфейса
+    "ui_lang": detect_system_lang(), # "en" | "ru" — язык интерфейса по умолчанию
     # --- Общие ---
     "mode": "dictionary",            # "translator" | "dictionary"
     "autostart": False,
@@ -39,20 +83,30 @@ DEFAULTS = {
     "autopause_window": "",
     "fullscreenize_window": "",
     # --- Слова ---
-    "auto_save_words": True,
+    "auto_save_words": False,
     "auto_crop_screenshots": False,
     "show_duplicate_badge": True,    # значок-метка у слов, которые встречаются не раз
     # --- Переводчик и словари ---
-    "sources_order": ["translator_pro", "looktionary_pro", "oxford"],
-    "sources_enabled": {"translator_pro": True, "looktionary_pro": True, "oxford": True},
+    "sources_order": ["translator_pro", "looktionary_pro"],
+    "sources_enabled": {"translator_pro": True, "looktionary_pro": True},
     "translator_pro": {"target_lang": "ru", "hide_in_dict_mode": False},
     "looktionary_pro": {"def_lang": "ru", "word_trans_lang": "ru", "hide_word_translation": False},
     # --- ИИ-провайдер ---
     "ai_provider": "groq",          # "groq" (быстрый) | "gemini"
     "groq_api_key": "",             # https://console.groq.com/keys
-    "groq_model": "llama-3.3-70b-versatile",
+    "groq_model": "auto",
     "gemini_api_key": "",
-    "gemini_model": "gemini-2.5-flash",
+    "gemini_model": "auto",
+    # --- Первый запуск ---
+    "first_setup_done": False,
+    # --- Anki (AnkiConnect) ---
+    "anki_enabled": True,
+    "anki_server": "http://127.0.0.1:8765",
+    "anki_tags": "wordsnap",
+    "anki_deck": "",
+    "anki_model": "",
+    "anki_fields": {},
+    "anki_duplicate_scope": "deck",
 }
 
 LANGS = [("ru", "Русский", "🇷🇺"), ("en", "English", "🇺🇸"), ("de", "Deutsch", "🇩🇪"),
@@ -74,6 +128,7 @@ def lang_name(lang: str) -> str:
 class Config:
     def __init__(self):
         self._d = copy.deepcopy(DEFAULTS)
+        self.is_first_run = not os.path.exists(SETTINGS_PATH())
         self.load()
 
     def load(self):
@@ -85,8 +140,10 @@ class Config:
                     self._d[k].update(v)
                 else:
                     self._d[k] = v
+            if "first_setup_done" not in stored:
+                self._d["first_setup_done"] = True
         except FileNotFoundError:
-            pass
+            self._d["first_setup_done"] = False
         except Exception as e:
             print("config load error:", e)
 

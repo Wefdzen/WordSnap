@@ -5,139 +5,154 @@
 <h1 align="center">WordSnap</h1>
 
 <p align="center">
-  <b>Look up any word on your screen — instantly.</b><br>
-  On-screen OCR + AI translation + a personal vocabulary trainer for language learners.
+  <b>Instant on-screen OCR translator, offline Yomitan dictionary & personal vocabulary trainer.</b><br>
+  Designed for language learners, gamers, and avid readers on Windows.
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" width="860" alt="WordSnap screenshot">
+  <a href="README.md"><b>English</b></a> • <a href="README_RU.md"><b>Русский</b></a>
+</p>
+
+<p align="center">
+  <img src="assets/app.jpg" width="860" alt="WordSnap application interface">
 </p>
 
 ---
 
-**WordSnap** lets you point at any word on your screen — in a game, a video, a PDF, a
-browser, anywhere — and instantly get its **OCR-recognized text**, an **AI translation**,
-and a **dictionary entry** in a small popup right next to the word. Everything you look
-up can be saved to a **personal word list** with screenshots, tags and CEFR levels, so
-you can review and study your vocabulary later.
+**WordSnap** allows you to point at any word or phrase on your screen — in 3D games, visual novels, videos, PDFs, manga, browsers, or desktop apps — and instantly receive an **OCR-recognized translation**, rich **offline Yomitan dictionary definitions**, and **AI-powered contextual analysis** in an animated, non-intrusive popup right next to your cursor.
 
-> Inspired by *Looktionary*. Built with Python + PySide6 (Qt) for Windows.
+Every word you discover can be saved to your **personal vocabulary list** with the original screenshot, sentence context, CEFR level, and tags, or synchronized directly to **Anki** with a single click.
 
-## Features
+---
 
-- **Global hotkey / mouse-button lookup** — press a configurable hotkey (default
-  `Alt+Q`) or a mouse button anywhere to look up the word under your cursor.
-- **Screen OCR** — recognizes on-screen text using Windows' built-in OCR (with a
-  Tesseract fallback), isolating the sentence around your cursor.
-- **AI translation ("Translator")** — contextual translation of the recognized
-  sentence via **Groq** or **Google Gemini**, with the target word highlighted.
-- **AI dictionary ("Looktionary")** — dictionary form, CEFR level (A1–C2),
-  phonetic transcription, part-of-speech, definition, translation and synonyms.
-- **Offline dictionary (Oxford slot)** — basic English lookups without internet.
-- **Animated, adaptive popup** — pops in with a bounce, slides so it never covers the
-  word, and auto-switches light/dark based on the screen brightness under your cursor.
-- **Personal word list** — favorites ★, custom **#tags**, full-text search, filters by
-  **language / source / level**, sorting by **date or level**, a word counter,
-  multi-select bulk delete, and view/edit modes. Click a screenshot to open it full-size.
-- **Text-to-speech** — listen to the pronunciation of any word.
-- **Export** — CSV, JSON, or **Anki** (TSV with `<img>` cards + copied media).
-- **Themes** — dark / light / follow-system, and a **RU / EN** interface language.
-- **Keyboard shortcuts**, **system tray**, and a custom **frameless Windows 11 UI**
-  with native edge resizing and animated tab navigation.
+## Key Features
 
-## How it works
+### 🔍 Instant On-Screen Lookup
+- **Global Hotkey & Mouse Buttons**: Look up words using configurable shortcuts (default: `Alt+Q`, or mouse middle button / side buttons X1 & X2).
+- **Windows Native OCR**: Lightning-fast, accurate text recognition without installing third-party OCR software (Tesseract is also supported as an alternative).
+- **Adaptive Floating Popup**: Smoothly bounces in next to the word, adjusts position so it never covers the text, and adapts to dark/light screen backgrounds.
 
-1. You press the global hotkey (or mouse button) while hovering over a word.
-2. The app captures the screen region around the cursor (`app/capture.py`), runs OCR
-   (`app/ocr.py`) and isolates the sentence/column containing the word.
-3. A popup (`app/ui/popup.py`) appears next to the word, showing the sources configured
-   in **Settings → Translator & dictionaries**: Translator, Looktionary, Oxford.
-4. You can bookmark the result to save it to your personal word list, stored together
-   with a cropped screenshot and source app/game name (`app/storage.py`).
+### 🎮 Built for Games: Freeze Screen Mode
+*Have you ever played an FPS, 3D RPG, or controller-based game where the mouse cursor is invisible or locked to camera rotation?*
+- **Freeze Screen Mode ("Заморозка экрана")**: Press your hotkey to freeze the screen pixel-perfect and unlock the Windows mouse cursor (`ClipCursor` release).
+- **Interactive Word Hovering**: All detected text on the frozen screen is highlighted on hover with a pointing cursor. Simply click any word to open the translation popup!
+- **Auto-Pause Games**: Automatically pauses the game process (`NtSuspendProcess`) during lookup so you never miss dialogues in cutscenes.
+- **Quick Dismiss**: Press `Esc`, `Alt+Q`, or click `✕` to immediately unfreeze and resume playing.
 
-## Keyboard shortcuts (Words tab)
+<details>
+  <summary>🎮 <b>Click to expand / collapse Freeze Screen Mode screenshot</b></summary>
+  <br>
+  <p align="center">
+    <a href="assets/freeze_mode.jpg">
+      <img src="assets/freeze_mode.jpg" width="620" alt="Freeze Screen Mode in Games">
+    </a>
+  </p>
+</details>
 
+### 📚 Full Yomitan (.zip) Offline Dictionaries
+- **100% Offline Lookups**: Import any standard Yomitan/Yomichan dictionary in `.zip` format (e.g. `wty-en-ru.zip`, JMdict, monolingual English/Japanese dictionaries).
+- **Morphological De-inflection**: Automatically recognizes base lemma forms (e.g., looking up `greater` correctly finds `great`, handles verb tenses and plurals).
+- **Structured Yomitan Cards**: Styled presentation with phonetic transcriptions, grammar badges, frequency tags, and clear definitions.
+
+### 🤖 Dual AI Sources (Groq & Google Gemini)
+- **Contextual Sentence Translation**: Fast neural machine translation of the whole sentence containing the word, factoring in the active game/app lore.
+- **Looktionary AI Card**: Comprehensive dictionary entry with CEFR language level (A1–C2), parts of speech, synonyms, definitions, and translations.
+- **Ultra-Fast & Resilient**: Supports **Groq** (<1 second response time) and **Google Gemini** (Gemini 2.5 Flash / 2.0 Flash) with automatic multi-model failover.
+
+### 🗃️ 1-Click Anki Integration
+- **Direct AnkiConnect Sync**: Connects directly to local Anki (port 8765) without manual file exports.
+- **Interactive Setup Wizard**: Select target deck, card note type, and visually map fields (`Word`, `Translation`, `Context`, `Screenshot`, `Audio`, `Definition`).
+- **One-Click Add**: Click the green `+` icon in the popup to instantly create a study card with an attached cropped screenshot. Duplicate detection lets you know if a word is already in your deck.
+
+### 📖 Personal Vocabulary Trainer ("Words" Tab)
+- **Rich Word Cards**: Browse your saved words with cropped screenshots of the scene, timestamp, source game/app name, and tags.
+- **Text-to-Speech (TTS)**: Native audio pronunciation for saved words.
+- **Filters & Search**: Filter by language, source application, CEFR level, favorites (★), and custom `#tags`.
+- **Export Options**: Export vocabulary to CSV, JSON, or Anki TSV decks.
+
+---
+
+## Keyboard Shortcuts
+
+### Words Page Navigation
 | Shortcut | Action |
 |---|---|
-| `Ctrl+F` | focus search |
-| `Space` | speak the current word |
-| `Delete` | delete selected |
-| `Ctrl+D` | toggle favorite |
-| `←` / `→` | previous / next word |
+| `Ctrl+F` | Focus search bar |
+| `Space` | Speak selected word (TTS) |
+| `Delete` | Delete selected word |
+| `Ctrl+D` | Toggle favorite (★) |
+| `←` / `→` | Previous / Next word card |
 
-## Project layout
+---
 
-```
-main.py                  Entry point: tray, global hotkeys, popup wiring
-app/
-  config.py               Settings (data/settings.json), languages
-  capture.py              Screen capture (mss)
-  ocr.py                  OCR + sentence/column isolation
-  gemini.py               AI providers (Groq / Gemini)
-  translator.py           Translation helpers
-  tts.py                  Text-to-speech
-  storage.py              Word list + screenshots, export (CSV/JSON/Anki)
-  hotkeys.py              Global hotkey listener (keyboard + mouse)
-  ui/
-    main_window.py         Window, custom titlebar, native resize, theming
-    words_page.py          "Words" tab — personal word list
-    dicts_page.py          "Translator & dictionaries" tab — sources & languages
-    settings_page.py        "Settings" tab — theme, language, hotkeys, OCR, AI
-    popup.py                The animated lookup popup
-    widgets.py              Reusable widgets, SVG icons, FluentRadio, toggles
-    theme.py                Dark / light / system palettes + Qt stylesheet
-    i18n.py                 RU / EN interface translations
-    overlay.py              Screen overlay / word highlight
-assets/
-  icon.png                  App icon (used in this README too)
-  screenshot.png            App screenshot shown in this README
-  svg/                       SVG icons used throughout the UI
-data/                        Created on first run (settings, words, screenshots)
-```
+## Installation & Downloads
 
-## Requirements
+Pre-built binaries for Windows 10/11 are available in the **[Releases](../../releases)** tab:
 
-- Windows 10/11 (built-in Windows OCR; reduced functionality elsewhere).
-- Python 3.11+ and the dependencies in `requirements.txt`:
+1. **Installer (`WordSnap-1.0.0-Setup.exe`)**:
+   Standard Windows setup wizard with Start Menu shortcut, desktop icon, and uninstaller.
+2. **Portable Version (`WordSnap-1.0.0-Portable.zip`)**:
+   Self-contained zero-installation version. Extract anywhere (e.g. USB drive or custom folder) and launch `WordSnap.exe`.
 
-```
+---
+
+## Running from Source
+
+### Prerequisites
+- Windows 10 or Windows 11 (requires native Windows OCR).
+- Python 3.11+.
+
+### Setup
+```bash
+# Clone the repository
+git clone https://github.com/Wefdzen/WordSnap.git
+cd WordSnap
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run WordSnap
+python main.py
 ```
 
-## Running from source
+On first launch, the interactive **Onboarding Wizard** will guide you through setting up your language, theme, hotkey, and optional AI keys.
 
-```
-py main.py
-```
+---
 
-(Use `py` — the Python launcher — if `python` is not on your PATH, e.g.
-`py .\lookupper\main.py` from the repo root.) On first run, `data/settings.json` and
-`data/words.json` are created automatically.
+## Building from Source
+
+To create both the Portable ZIP and Setup Installer executable:
+
+```bash
+# Compile standalone distribution, portable ZIP, and installer
+python build_dist.py
+```
+Outputs are generated in the `release/` directory:
+- `release/WordSnap-1.0.0-Setup.exe`
+- `release/WordSnap-1.0.0-Portable.zip`
+
+*(Note: Building the installer requires [Inno Setup 6](https://jrsoftware.org/isinfo.php). If Inno Setup is not found, the portable build is still completed.)*
+
+---
 
 ## Configuration
 
-Open the **Settings** tab to configure the theme, interface language, hotkeys, OCR
-language, and the AI provider + API key:
+In the **Settings** tab, you can customize:
+- **Theme**: Dark, Light, or follow Windows system theme.
+- **Language**: English or Russian.
+- **Hotkeys**: Keyboard combination and mouse triggers (middle button / side buttons).
+- **OCR Engine**: Windows OCR or Tesseract OCR, along with target recognition language.
+- **Game Interactions**:
+  - *Freeze screen* (recommended for 3D shooters and games without a visible cursor).
+  - *Auto-pause games* (suspends game process during popup lookup).
+  - *Stretch to fullscreen* (for windowed games).
+- **AI Providers**: Enter your free [Groq API Key](https://console.groq.com/keys) or [Gemini API Key](https://aistudio.google.com/app/apikey).
+- **AnkiConnect**: Configure deck name, note type, and field mappings.
 
-- Groq key: https://console.groq.com/keys
-- Gemini key: https://aistudio.google.com/app/apikey
-
-## Building a standalone .exe
-
-```
-build_exe.bat
-```
-
-Bundles `main.py` with the required `winrt` OCR modules and copies `assets/` next to
-the executable. Output: `dist/Lookupper/Lookupper.exe` (run **that** one, not anything
-in `build/`). Add `assets/icon.ico` to give the `.exe` a custom file icon.
+---
 
 ## License
 
-**PolyForm Noncommercial License 1.0.0.**
+**PolyForm Noncommercial License 1.0.0**
 
-You are free to **use, copy, fork, modify and share** this project **for noncommercial
-purposes** (personal use, study, research, etc.). **Commercial use — including selling
-the app or paid modifications — is not allowed.**
-
-Full text: https://polyform-noncommercial.org/  · See the `LICENSE` file in this repo.
+You are free to use, copy, modify, and share this project for non-commercial purposes (personal study, gaming, research). Commercial use is not permitted. See [LICENSE](LICENSE) for details.
