@@ -1,19 +1,20 @@
 import sys
 import threading
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QUrl
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QStackedWidget, QFileDialog,
-    QFrame, QApplication, QMessageBox, QComboBox
+    QFrame, QApplication, QMessageBox, QComboBox, QCheckBox
 )
-from PySide6.QtGui import QCursor, QPalette, QColor
+from PySide6.QtGui import QCursor, QPalette, QColor, QDesktopServices
 
 from ..config import CONFIG, detect_system_lang
-from .theme import resolve, apply_theme_live
+from .theme import resolve, apply_theme_live, apply_native_window_theme, save_window_size, restore_window_size
 from .i18n import t
 from ..gemini import Groq, Gemini
 from ..anki import get_anki_client
 from ..dictionaries import DICTIONARIES, dict_key
+from .dict_installer import DictionaryInstallDialog
 
 UI_LANGS = [
     ("en", "English", "🇺🇸"),
@@ -90,8 +91,10 @@ class OnboardingWizard(QDialog):
         self.anki_check_done.connect(self._on_anki_check_done)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setWindowTitle("WordSnap — " + t("Быстрый старт"))
-        self.setFixedSize(680, 560)
+        self.setMinimumSize(640, 520)
+        restore_window_size("onboarding", self, 680, 560)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        apply_native_window_theme(int(self.winId()))
 
         self._current_theme_name = CONFIG.get("ui_theme", "dark")
 
@@ -600,13 +603,24 @@ class OnboardingWizard(QDialog):
         dc_desc.setObjectName("Dim")
         dc_desc.setWordWrap(True)
 
+        dict_btns = QHBoxLayout()
+        dict_btns.setSpacing(10)
         self.btn_install_dict = QPushButton("📁 " + t("Установить словарь (.zip)"))
         self.btn_install_dict.setCursor(Qt.PointingHandCursor)
         self.btn_install_dict.clicked.connect(self._install_dict_dialog)
+        dict_btns.addWidget(self.btn_install_dict)
+
+        self.btn_dl_dicts = QPushButton("🌐 " + t("Скачать словари (Wiktionary)"))
+        self.btn_dl_dicts.setCursor(Qt.PointingHandCursor)
+        self.btn_dl_dicts.setObjectName("Flat")
+        self.btn_dl_dicts.setStyleSheet("color: #60cdff; font-weight: 600; padding: 4px 8px; font-size: 12px;")
+        self.btn_dl_dicts.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://yomidevs.github.io/wiktionary-to-yomitan/download/")))
+        dict_btns.addWidget(self.btn_dl_dicts)
+        dict_btns.addStretch(1)
 
         dc_lay.addWidget(dc_head)
         dc_lay.addWidget(dc_desc)
-        dc_lay.addWidget(self.btn_install_dict)
+        dc_lay.addLayout(dict_btns)
         lay.addWidget(dict_card)
         lay.addSpacing(6)
 
@@ -616,14 +630,29 @@ class OnboardingWizard(QDialog):
         ac_lay = QVBoxLayout(anki_card)
         ac_lay.setSpacing(8)
 
+        ac_head_row = QHBoxLayout()
         ac_head = QLabel("🎴 " + t("Интеграция с Anki (AnkiConnect)"))
         ac_head.setStyleSheet("font-size: 13px; font-weight: 600;")
+        ac_head_row.addWidget(ac_head)
+        ac_head_row.addStretch(1)
+
+        self.btn_anki_details = QPushButton("ℹ️ " + t("Подробнее"))
+        self.btn_anki_details.setObjectName("Flat")
+        self.btn_anki_details.setCursor(Qt.PointingHandCursor)
+        self.btn_anki_details.setStyleSheet("color: #60cdff; font-size: 12px; font-weight: 600;")
+        self.btn_anki_details.clicked.connect(self._show_anki_guide)
+        ac_head_row.addWidget(self.btn_anki_details)
+
+        self.sw_anki = QCheckBox(t("Включить сохранение карточек в Anki"))
+        self.sw_anki.setChecked(CONFIG.get("anki_enabled", False))
+        self.sw_anki.stateChanged.connect(lambda st: CONFIG.set("anki_enabled", bool(st)))
 
         self.lbl_anki_status = QLabel(t("⏳ Проверка подключения к AnkiConnect..."))
         self.lbl_anki_status.setObjectName("Dim")
         self.lbl_anki_status.setWordWrap(True)
 
-        ac_lay.addWidget(ac_head)
+        ac_lay.addLayout(ac_head_row)
+        ac_lay.addWidget(self.sw_anki)
         ac_lay.addWidget(self.lbl_anki_status)
         lay.addWidget(anki_card)
 
@@ -632,14 +661,39 @@ class OnboardingWizard(QDialog):
         lay.addStretch(1)
         self.stack.addWidget(page)
 
+    def _show_anki_guide(self):
+        msg = (
+            "<h3>" + t("Как подключить Anki к WordSnap") + "</h3>"
+            "<ol style='line-height: 160%; margin-left: -20px;'>"
+            "<li>" + t("Запустите приложение <b>Anki</b> на компьютере.") + "</li>"
+            "<li>" + t("В верхнем меню Anki выберите <b>Инструменты (Tools) → Дополнения (Add-ons)</b>.") + "</li>"
+            "<li>" + t("Нажмите кнопку <b>Загрузить дополнения (Get Add-ons...)</b>.") + "</li>"
+            "<li>" + t("В поле «Код» введите <b>2055492159</b> (плагин AnkiConnect) и нажмите <b>ОК</b>.") + "</li>"
+            "<li>" + t("<b>Перезапустите Anki</b>, чтобы плагин активировался.") + "</li>"
+            "</ol>"
+            "<p style='color: #a0a0a0; font-size: 12px; margin-top: 8px;'>" +
+            t("После этого включите галочку интеграции, и WordSnap сможет автоматически сохранять карточки слов с переводом, контекстом и скриншотом!") +
+            "</p>"
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle(t("Подключение Anki"))
+        box.setTextFormat(Qt.RichText)
+        box.setText(msg)
+        btn_recheck = box.addButton(t("Проверить снова"), QMessageBox.ActionRole)
+        box.addButton(t("Понятно"), QMessageBox.AcceptRole)
+        box.exec()
+        if box.clickedButton() == btn_recheck:
+            self.lbl_anki_status.setText(t("⏳ Проверка подключения к AnkiConnect..."))
+            self._check_anki_async()
+
     def _install_dict_dialog(self):
         fn, _ = QFileDialog.getOpenFileName(
             self, t("Выберите файл словаря Yomitan"), "", "ZIP archives (*.zip)"
         )
         if fn:
-            try:
-                QApplication.setOverrideCursor(Qt.WaitCursor)
-                res = DICTIONARIES.import_zip(fn)
+            dlg = DictionaryInstallDialog(self, fn)
+            if dlg.exec() == QDialog.Accepted and dlg.result:
+                res = dlg.result
                 k = dict_key(res["id"])
                 order = list(CONFIG.get("sources_order", []))
                 if k not in order:
@@ -648,7 +702,6 @@ class OnboardingWizard(QDialog):
                 en = dict(CONFIG.get("sources_enabled", {}))
                 en[k] = True
                 CONFIG.set("sources_enabled", en)
-                QApplication.restoreOverrideCursor()
 
                 title = res.get("title", res.get("id"))
                 QMessageBox.information(
@@ -657,9 +710,8 @@ class OnboardingWizard(QDialog):
                 )
                 self.btn_install_dict.setText(f"✓ {title} " + t("установлен"))
                 self.btn_install_dict.setStyleSheet("color: #4caf50; font-weight: bold;")
-            except Exception as e:
-                QApplication.restoreOverrideCursor()
-                QMessageBox.critical(self, t("Ошибка"), f"{t('Ошибка установки словаря')}: {e}")
+            elif dlg.error:
+                QMessageBox.critical(self, t("Ошибка"), f"{t('Ошибка установки словаря')}: {dlg.error}")
 
     def _check_anki_async(self):
         def worker():
@@ -824,3 +876,7 @@ class OnboardingWizard(QDialog):
         self.btn_skip.setText(t("Пропустить шаг"))
         self.btn_back.setText(t("Назад"))
         self._update_nav_buttons()
+
+    def closeEvent(self, e):
+        save_window_size("onboarding", self)
+        super().closeEvent(e)

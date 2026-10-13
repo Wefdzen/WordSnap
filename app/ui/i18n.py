@@ -67,7 +67,7 @@ _EN = {
         "Pick the language matching the on-screen text, otherwise recognition may be wrong.",
 
     # --- настройки: игры ---
-    "Делать оверлей активным окном  ⓘ": "Make overlay the active window  ⓘ",
+    "Делать оверлей активным окном": "Make overlay the active window",
     "Одни игры работают лучше при включённой функции, другие — при выключенной.":
         "Some games work better with it on, others with it off.",
     "Заморозка экрана": "Freeze screen",
@@ -241,6 +241,10 @@ _EN = {
         "Status: <span style='color:#4caf50; font-weight:600;'>Connected (%s)</span>",
     "Статус: <span style='color:#e0564b; font-weight:600;'>Ошибка подключения</span> <span style='color:#999; font-size:11px;'>(%s)</span>":
         "Status: <span style='color:#e0564b; font-weight:600;'>Connection error</span> <span style='color:#999; font-size:11px;'>(%s)</span>",
+    "Статус: <span style='color:#999;'>Включите функцию интеграции с Anki</span>":
+        "Status: <span style='color:#999;'>Enable Anki integration</span>",
+    "Статус: <span style='color:#999;'>⏳ Проверка...</span>":
+        "Status: <span style='color:#999;'>⏳ Checking...</span>",
     "✨ Автоматически (Новейшая версия)": "✨ Auto (Latest version)",
     "«Авто» всегда использует самую новую и мощную модель без ручных обновлений.":
         "'Auto' always uses the newest and most powerful model without manual updates.",
@@ -394,7 +398,7 @@ _EN = {
     "Пропустить настройку": "Skip setup",
     "Назад": "Back",
     "Далее": "Next",
-    "Начать работу 🚀": "Get started 🚀",
+    "Начать работу ": "Get started ",
     "Запустить мастер первоначальной настройки": "Run initial setup wizard",
     "Пройти пошаговую настройку языка, темы, режима и ИИ заново.":
         "Run step-by-step setup for language, theme, mode and AI again.",
@@ -404,11 +408,109 @@ _EN = {
     "выход": "exit",
     "Под курсором нет текста. Для игр без курсора включите «Заморозка экрана» в Настройках.":
         "No text under cursor. For games without a cursor, enable 'Freeze screen' in Settings.",
+
+    # --- дополнительные элементы интерфейса & диалоги ---
+    "Язык интерфейса:": "Interface language:",
+    "Тема оформления:": "Theme:",
+    "Все языки": "All languages",
+    "Все источники": "All sources",
+    "Все уровни": "All levels",
+    "По дате": "By date",
+    "По уровню": "By level",
+    "Вкл": "On",
+    "Откл": "Off",
+    "Озвучить": "Speak",
+    "Режим словаря (AI & Изучение языков)": "Dictionary mode (AI & Language study)",
+    "«Авто» всегда использует самую новую и быструю модель Flash.":
+        "'Auto' always uses the newest and fastest Flash model.",
+    "Бесплатный ключ за 30 сек: <a href='https://console.groq.com/keys' style='color:#60cdff;'>console.groq.com/keys</a> (можно пропустить и ввести позже).":
+        "Free key in 30 sec: <a href='https://console.groq.com/keys' style='color:#60cdff;'>console.groq.com/keys</a> (can be skipped and entered later).",
+    "Бесплатный ключ: <a href='https://aistudio.google.com' style='color:#60cdff;'>aistudio.google.com</a> (можно пропустить и ввести позже).":
+        "Free key: <a href='https://aistudio.google.com' style='color:#60cdff;'>aistudio.google.com</a> (can be skipped and entered later).",
+    "Выберите файл словаря Yomitan": "Select Yomitan dictionary file",
+    "Словарь «%s» успешно установлен и активирован!": "Dictionary “%s” successfully installed and activated!",
+    "установлен": "installed",
+    "Anki: нет подключения к AnkiConnect (нажмите для проверки)":
+        "Anki: no connection to AnkiConnect (click to check)",
+    "Groq 400 (json_validate_failed): повторяем запрос без строгого response_format...":
+        "Groq 400 (json_validate_failed): retrying request without strict response_format...",
+    "Скачать словари (Wiktionary)": "Download dictionaries (Wiktionary)",
+    "Скачать словари (Wiktionary / Yomitan)": "Download dictionaries (Wiktionary / Yomitan)",
+    "🌐  Скачать словари (Wiktionary / Yomitan)": "🌐  Download dictionaries (Wiktionary / Yomitan)",
+    "Включить сохранение карточек в Anki": "Enable saving cards to Anki",
+    "Подробнее": "Details",
+    "Как подключить Anki к WordSnap": "How to connect Anki to WordSnap",
+    "Запустите приложение <b>Anki</b> на компьютере.": "Launch the <b>Anki</b> application on your PC.",
+    "В верхнем меню Anki выберите <b>Инструменты (Tools) → Дополнения (Add-ons)</b>.":
+        "In the top menu of Anki select <b>Tools → Add-ons</b>.",
+    "Нажмите кнопку <b>Загрузить дополнения (Get Add-ons...)</b>.":
+        "Click the button <b>Get Add-ons...</b>.",
+    "В поле «Код» введите <b>2055492159</b> (плагин AnkiConnect) и нажмите <b>ОК</b>.":
+        "In the 'Code' field enter <b>2055492159</b> (AnkiConnect add-on) and click <b>OK</b>.",
+    "<b>Перезапустите Anki</b>, чтобы плагин активировался.":
+        "<b>Restart Anki</b> to activate the add-on.",
+    "После этого включите галочку интеграции, и WordSnap сможет автоматически сохранять карточки слов с переводом, контекстом и скриншотом!":
+        "After that, enable the integration checkbox, and WordSnap will automatically save word cards with translation, context, and screenshots!",
+    "Подключение Anki": "Anki connection",
+    "Проверить снова": "Check again",
+    "Понятно": "Got it",
+    "Распаковка и обработка базы терминов...": "Extracting and processing terms database...",
+    "Индексация базы": "Indexing database",
+    "Назначение горячей клавиши": "Assign Hotkey",
+    "Нажмите комбинацию клавиш на клавиатуре": "Press key combination on your keyboard",
+    "Нажмите желаемую комбинацию (например Alt+Q или Ctrl+Shift+A). Esc — отмена.":
+        "Press desired combination (e.g. Alt+Q or Ctrl+Shift+A). Esc to cancel.",
+    "Назначить": "Assign",
+    "Установка словаря": "Dictionary installation",
+    "Выбор и выделение слов": "Select and mark words",
+    "Все слова": "All words",
+    "За сегодня": "Today",
+    "За последние 7 дней": "Last 7 days",
+    "За последние 30 дней": "Last 30 days",
+    "Выбрать диапазон дат...": "Select date range...",
+    "Снять выделение": "Clear selection",
+    "Выбор периода дат": "Select Date Range",
+    "Начальная дата:": "Start date:",
+    "Конечная дата:": "End date:",
+    "Выбрать": "Select",
+    "По дате (сначала новые)": "By date (newest first)",
+    "По дате (сначала старые)": "By date (oldest first)",
+    "По уровню (A1 → C2)": "By level (A1 → C2)",
+    "По уровню (C2 → A1)": "By level (C2 → A1)",
+    "Порядок сортировки (по убыванию / возрастанию)": "Sort order (descending / ascending)",
+    "Сначала новые (по убыванию)": "Newest first (descending)",
+    "Сначала старые (по возрастанию)": "Oldest first (ascending)",
+    "От простых к сложным (A1 → C2)": "Easy to hard (A1 → C2)",
+    "От сложных к простым (C2 → A1)": "Hard to easy (C2 → A1)",
+
+    # --- поддержка проекта и благодарность ---
+    "Поддержать разработчика": "Support the developer",
+    "❤️ Поддержать": "❤️ Support",
+    "Поддержать": "Support",
+    "Поддержать разработку": "Support development",
+    "Открыть страницу поддержки разработчика на DonationAlerts": "Open developer support page on DonationAlerts",
+    "Спасибо за поддержку! ❤️": "Thank you for your support! ❤️",
+    "Огромное спасибо за поддержку! ❤️": "Huge thanks for your support! ❤️",
+    "Огромное спасибо за поддержку!": "Huge thanks for your support!",
+    "Каждый донат помогает развивать WordSnap и делать его лучше.": "Every donation helps WordSnap grow and become even better.",
+    "Перейти к донату": "Go to DonationAlerts",
+    "Закрыть": "Close",
 }
 
 
 def t(s: str) -> str:
     """Перевести строку на язык интерфейса (en) или вернуть как есть (ru)."""
     if CONFIG.get("ui_lang", "ru") == "en":
+        if s in _EN:
+            return _EN[s]
+        # Если строка заканчивается на двоеточие, пробуем перевести основу
+        if s.endswith(":") and s[:-1] in _EN:
+            return _EN[s[:-1]] + ":"
+        # Если строка с ведущими/завершающими пробелами
+        stripped = s.strip()
+        if stripped in _EN:
+            prefix = s[:len(s) - len(s.lstrip())]
+            suffix = s[len(s.rstrip()):]
+            return prefix + _EN[stripped] + suffix
         return _EN.get(s, s)
     return s

@@ -38,6 +38,7 @@ class HotkeyManager(QObject):
     triggered = Signal(int, int)          # x, y курсора в момент нажатия
     alt_state = Signal(bool)              # для режима переводчика (удержание Alt)
     escaped = Signal()                    # глобальный Esc — закрыть попап/оверлей
+    wheel_scrolled = Signal(int)          # прокрутка колесика (delta) при активном попапе
 
     def __init__(self, cfg):
         super().__init__()
@@ -45,6 +46,9 @@ class HotkeyManager(QObject):
         self._kb = None
         self._mouse = None
         self._alt_listener = None
+        self._wheel_listener = None
+        self.is_escape_suppress_active = None # callable() -> bool
+        self.is_wheel_suppress_active = None  # callable(x, y) -> bool
 
     # ------------------------------------------------------------------
     def start(self):
@@ -53,6 +57,18 @@ class HotkeyManager(QObject):
         self._mods_down: set[str] = set()
         self._key_armed = True  # защита от автоповтора при удержании
         try:
+            def kb_filter(msg, data):
+                # 0x1B = VK_ESCAPE
+                if getattr(data, "vkCode", None) == 0x1B:
+                    if self.is_escape_suppress_active and self.is_escape_suppress_active():
+                        # WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104
+                        if msg in (0x0100, 0x0104):
+                            self.escaped.emit()
+                        if self._kb:
+                            self._kb.suppress_event()
+                        return False
+                return True
+
             def on_press(k):
                 if k == keyboard.Key.esc:
                     self.escaped.emit()
@@ -73,11 +89,38 @@ class HotkeyManager(QObject):
                 elif _key_matches(k, self._main_key):
                     self._key_armed = True
 
-            self._kb = keyboard.Listener(on_press=on_press, on_release=on_release)
+            self._kb = keyboard.Listener(
+                on_press=on_press,
+                on_release=on_release,
+                win32_event_filter=kb_filter
+            )
             self._kb.daemon = True
             self._kb.start()
         except Exception as e:
             print("hotkey error:", e)
+
+        # Перехват и изоляция колесика мыши (чтобы не крутило игру за окном попапа)
+        try:
+            def mouse_filter(msg, data):
+                # WM_MOUSEWHEEL = 0x020A
+                if msg == 0x020A:
+                    pt_x = getattr(getattr(data, "pt", None), "x", 0)
+                    pt_y = getattr(getattr(data, "pt", None), "y", 0)
+                    if self.is_wheel_suppress_active and self.is_wheel_suppress_active(pt_x, pt_y):
+                        import ctypes
+                        raw_data = getattr(data, "mouseData", 0)
+                        delta = ctypes.c_short(raw_data >> 16).value
+                        self.wheel_scrolled.emit(int(delta))
+                        if self._wheel_listener:
+                            self._wheel_listener.suppress_event()
+                        return False
+                return True
+
+            self._wheel_listener = mouse.Listener(win32_event_filter=mouse_filter)
+            self._wheel_listener.daemon = True
+            self._wheel_listener.start()
+        except Exception as e:
+            print("mouse wheel listener error:", e)
 
         if self.cfg.get("mouse_hotkey_enabled") and self.cfg.get("mouse_hotkey_button") != "none":
             btn_name = self.cfg.get("mouse_hotkey_button", "middle")
@@ -111,13 +154,13 @@ class HotkeyManager(QObject):
                 self._mouse.start()
 
     def stop(self):
-        for l in (self._kb, self._mouse, self._alt_listener):
+        for l in (self._kb, self._mouse, self._alt_listener, self._wheel_listener):
             if l:
                 try:
                     l.stop()
                 except Exception:
                     pass
-        self._kb = self._mouse = self._alt_listener = None
+        self._kb = self._mouse = self._alt_listener = self._wheel_listener = None
 
     def restart(self):
         self.start()

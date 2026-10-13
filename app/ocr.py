@@ -35,6 +35,17 @@ OCR_LANG_TAGS = {  # код языка -> BCP-47 для Windows OCR / код tes
     "zh": ("zh-CN", "chi_sim"), "ko": ("ko-KR", "kor"), "uk": ("uk-UA", "ukr"),
 }
 
+def preprocess_for_game_ocr(image: Image.Image, scale: float = 2.0) -> tuple[Image.Image, float]:
+    """Предобработка для игр с тёмным UI, мелким или стилизованным шрифтом:
+    масштабирование Bicubic + автоконтраст + усиление резкости."""
+    from PIL import ImageOps, ImageFilter
+    w, h = max(1, int(image.width * scale)), max(1, int(image.height * scale))
+    up = image.resize((w, h), Image.Resampling.BICUBIC)
+    gray = up.convert("L")
+    contrast = ImageOps.autocontrast(gray, cutoff=1)
+    sharp = contrast.filter(ImageFilter.SHARPEN)
+    return sharp, scale
+
 # ---------------------------------------------------------------- Windows OCR
 class WindowsOcrEngine:
     name = "Рекомендуемый (Windows OCR)"
@@ -44,7 +55,28 @@ class WindowsOcrEngine:
 
     def recognize(self, image: Image.Image) -> list[OcrLine]:
         import asyncio
-        return asyncio.run(self._recognize_async(image))
+        lines = asyncio.run(self._recognize_async(image))
+        total_words = sum(len(l.words) for l in lines)
+
+        # Если найдено мало слов (характерно для тёмного UI игр, светящихся или мелких шрифтов),
+        # автоматически запускаем второй улучшенный проход с масштабированием и контрастом
+        if total_words < 3 and image.width >= 16 and image.height >= 16:
+            try:
+                enhanced, scale = preprocess_for_game_ocr(image, scale=2.0)
+                enh_lines = asyncio.run(self._recognize_async(enhanced))
+                enh_words = sum(len(l.words) for l in enh_lines)
+                if enh_words > total_words:
+                    scaled_lines = []
+                    for l in enh_lines:
+                        words = [OcrWord(w.text, w.x / scale, w.y / scale, w.w / scale, w.h / scale)
+                                 for w in l.words]
+                        scaled_lines.append(OcrLine(
+                            l.text, l.x / scale, l.y / scale, l.w / scale, l.h / scale, words
+                        ))
+                    return scaled_lines
+            except Exception:
+                pass
+        return lines
 
     async def _recognize_async(self, image: Image.Image) -> list[OcrLine]:
         try:  # новый pywinrt (Python 3.13/3.14+)
@@ -111,7 +143,7 @@ class TesseractEngine:
     def __init__(self, lang: str):
         self.lang = OCR_LANG_TAGS.get(lang, ("en-US", "eng"))[1]
 
-    def recognize(self, image: Image.Image) -> list[OcrLine]:
+    def _recognize_raw(self, image: Image.Image) -> list[OcrLine]:
         import pytesseract
         data = pytesseract.image_to_data(image, lang=self.lang,
                                          output_type=pytesseract.Output.DICT)
@@ -131,6 +163,27 @@ class TesseractEngine:
             x1 = max(w.x + w.w for w in words); y1 = max(w.y + w.h for w in words)
             lines.append(OcrLine(" ".join(w.text for w in words), x0, y0, x1 - x0, y1 - y0, words))
         lines.sort(key=lambda l: (l.y, l.x))
+        return lines
+
+    def recognize(self, image: Image.Image) -> list[OcrLine]:
+        lines = self._recognize_raw(image)
+        total_words = sum(len(l.words) for l in lines)
+        if total_words < 3 and image.width >= 16 and image.height >= 16:
+            try:
+                enhanced, scale = preprocess_for_game_ocr(image, scale=2.0)
+                enh_lines = self._recognize_raw(enhanced)
+                enh_words = sum(len(l.words) for l in enh_lines)
+                if enh_words > total_words:
+                    scaled_lines = []
+                    for l in enh_lines:
+                        words = [OcrWord(w.text, w.x / scale, w.y / scale, w.w / scale, w.h / scale)
+                                 for w in l.words]
+                        scaled_lines.append(OcrLine(
+                            l.text, l.x / scale, l.y / scale, l.w / scale, l.h / scale, words
+                        ))
+                    return scaled_lines
+            except Exception:
+                pass
         return lines
 
 def get_engine(cfg) -> "WindowsOcrEngine | TesseractEngine":
@@ -155,8 +208,9 @@ def get_engine(cfg) -> "WindowsOcrEngine | TesseractEngine":
 _WORD_RX = re.compile(r"[\w'’\-]+", re.UNICODE)
 
 def clean_word(text: str) -> str:
-    m = _WORD_RX.search(text)
-    return m.group(0) if m else text.strip()
+    cleaned = text.strip(" [](){}<>\"'«».,:;!?*~`_")
+    m = _WORD_RX.search(cleaned)
+    return m.group(0) if m else cleaned
 
 def word_at_point(lines: list[OcrLine], px: float, py: float):
     """Слово под точкой (курсором) или ближайшее к ней. Возвращает (line, word) | (None, None)."""
@@ -168,7 +222,7 @@ def word_at_point(lines: list[OcrLine], px: float, py: float):
             d = (w.cx - px) ** 2 + (w.cy - py) ** 2
             if d < best_d:
                 best_d, best, best_line = d, w, line
-    if best is not None and best_d < 200 ** 2:
+    if best is not None and best_d < 260 ** 2:
         return best_line, best
     return None, None
 

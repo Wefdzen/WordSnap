@@ -87,7 +87,7 @@ def highlighted(text: str) -> QLabel:
     t = html.escape(text).replace("&lt;u&gt;", f"<span style='background:{HILITE};'>") \
                          .replace("&lt;/u&gt;", "</span>")
     l = QLabel(t); l.setTextFormat(Qt.RichText); l.setWordWrap(True)
-    l.setStyleSheet("font-size: 13.5px;")
+    l.setStyleSheet("font-size: 13px;")
 class YomitanSenseWidget(QWidget):
     """Словарная статья офлайн-словаря в стиле Yomitan:
     - Заголовок с номером, бейджем части речи (n) и фиолетовым бейджем словаря
@@ -195,7 +195,7 @@ class YomitanSenseWidget(QWidget):
             fallback.setTextFormat(Qt.RichText)
             fallback.setWordWrap(True)
             fallback.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            fallback.setStyleSheet("color: #cccccc; font-size: 13.5px; padding-left: 14px; margin-top: 4px;")
+            fallback.setStyleSheet("color: #cccccc; font-size: 13px; padding-left: 14px; margin-top: 4px;")
             v.addWidget(fallback)
             return
 
@@ -218,7 +218,7 @@ class YomitanSenseWidget(QWidget):
             etym_lbl.setWordWrap(True)
             etym_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
             etym_lbl.setStyleSheet(
-                "color: #cccccc; font-size: 12.5px; border-left: 2px solid #484848; "
+                "color: #cccccc; font-size: 12px; border-left: 2px solid #484848; "
                 "padding-left: 8px; line-height: 1.45;"
             )
             eb_lay.addWidget(etym_lbl)
@@ -252,7 +252,7 @@ class YomitanSenseWidget(QWidget):
             text_lbl.setTextFormat(Qt.RichText)
             text_lbl.setWordWrap(True)
             text_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            text_lbl.setStyleSheet("color: #ffffff; font-size: 13.5px;")
+            text_lbl.setStyleSheet("color: #ffffff; font-size: 13px;")
             main_line.addWidget(text_lbl)
 
             # Если есть примеры
@@ -564,6 +564,18 @@ class DictionaryPopup(QWidget):
         self.setWindowOpacity(0.95)     # Дефолтная прозрачность для будущего спавна
         self.setMinimumSize(0, 0); self.setMaximumSize(16777215, 16777215)
         self.setFixedWidth(POPUP_W)
+
+    def scroll_by_delta(self, delta: int):
+        """Прокручивает содержимое окна словаря колесиком мыши."""
+        if hasattr(self, "area") and self.area.isVisible():
+            bar = self.area.verticalScrollBar()
+            steps = int(delta / 120.0 * 48.0)
+            bar.setValue(bar.value() - steps)
+
+    def wheelEvent(self, e):
+        delta = e.angleDelta().y()
+        self.scroll_by_delta(delta)
+        e.accept()
 
     # -------------------------------------- позиционирование над/под словом
     def place_near_word(self, wx: int, wy: int, ww: int, wh: int):

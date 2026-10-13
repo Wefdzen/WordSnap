@@ -71,7 +71,7 @@ class Controller(QObject):
     def __init__(self, app: QApplication):
         super().__init__()
         self.app = app
-        self.window = MainWindow()
+        self.window: MainWindow | None = None
         self.popup = DictionaryPopup()
         self.overlay: TranslationOverlay | None = None
         self.freeze_overlay: FreezeFrameOverlay | None = None
@@ -86,10 +86,9 @@ class Controller(QObject):
 
         self.hotkeys.triggered.connect(self.on_hotkey)
         self.hotkeys.escaped.connect(self.on_escape)
-        self.window.settings_page.hotkeys_changed.connect(self.hotkeys.restart)
-        self.window.settings_page.words_display_changed.connect(self.window.words_page.reload)
-        self.window.settings_page.anki_settings_changed.connect(self._on_anki_settings_changed)
-        self.window.words_page.fetch_missing.connect(self.fetch_missing)
+        self.hotkeys.wheel_scrolled.connect(self.popup.scroll_by_delta)
+        self.hotkeys.is_escape_suppress_active = self._is_escape_suppress_active
+        self.hotkeys.is_wheel_suppress_active = self._is_wheel_suppress_active
         self.popup.bookmark_clicked.connect(self.toggle_pending_bookmark)
         self.popup.anki_clicked.connect(self.add_current_to_anki)
         self.popup.closed.connect(self.close_highlight)
@@ -102,7 +101,6 @@ class Controller(QObject):
         self.bridge.source_failed.connect(self.popup.fail_source)
         self.bridge.overlay_ready.connect(self.show_overlay)
         self.bridge.highlight_ready.connect(self.show_highlight)
-        self.bridge.words_changed.connect(self.window.words_page.reload)
         self.bridge.anki_status.connect(self.popup.set_anki_state)
         self.bridge.anki_visible.connect(self.popup.set_anki_visible)
         self.bridge.bookmark_saved.connect(self.popup.set_bookmark_saved)
@@ -111,13 +109,33 @@ class Controller(QObject):
         self.hotkeys.start()
         self._start_click_watch()
         self._check_anki_connection_async()
+
         if not CONFIG.get("first_setup_done"):
+            # При первом запуске показываем ТОЛЬКО мастер настройки, главное окно не открываем
             from app.ui.onboarding_dialog import OnboardingWizard
-            self.onboarding = OnboardingWizard(self.window)
+            self.onboarding = OnboardingWizard(None)
             self.onboarding.finished.connect(self._on_onboarding_finished)
             self.onboarding.show()
         else:
+            self._create_main_window(show=True)
+
+    def _create_main_window(self, show: bool = True):
+        """Создание главного окна приложения и привязка его обработчиков."""
+        if self.window is not None:
+            try:
+                self.window.deleteLater()
+            except Exception:
+                pass
+        self.window = MainWindow()
+        self.window.settings_page.hotkeys_changed.connect(self.hotkeys.restart)
+        self.window.settings_page.words_display_changed.connect(self.window.words_page.reload)
+        self.window.settings_page.anki_settings_changed.connect(self._on_anki_settings_changed)
+        self.window.words_page.fetch_missing.connect(self.fetch_missing)
+        self.bridge.words_changed.connect(self.window.words_page.reload)
+        if show:
             self.window.show()
+            self.window.raise_()
+            self.window.activateWindow()
 
     def _on_onboarding_finished(self):
         CONFIG.set("first_setup_done", True, save=True)
@@ -125,9 +143,10 @@ class Controller(QObject):
         from app.ui.theme import P, resolve, apply_theme_live
         if P != resolve(theme):
             apply_theme_live(self.app, theme)
-        self.window.show()
-        self.window.raise_()
-        self.window.activateWindow()
+
+        # Создаём главное окно после успешного завершения первичной настройки
+        self._create_main_window(show=True)
+        self._tray()
 
     # ------------------------------------- закрытие попапа кликом мимо него
     def _start_click_watch(self):
@@ -146,6 +165,10 @@ class Controller(QObject):
     def _on_outside_click(self, x: int, y: int):
         if not self.popup.isVisible():
             self._popup_open = False
+            return
+        import time
+        # Защита: игнорируем клики в первые 450 мс после открытия (клик, который открыл попап)
+        if time.time() - getattr(self, "_popup_open_time", 0) < 0.45:
             return
         # клик внутри окна попапа (кнопки, закладка) — не закрываем
         if self.popup.frameGeometry().contains(QPoint(x, y)):
@@ -179,24 +202,63 @@ class Controller(QObject):
         if self._pending_entry and not self._pending_entry.get("id") and not self._pending_entry.get("anki_in_progress"):
             self._pending_entry = None
 
+    def _is_escape_suppress_active(self) -> bool:
+        """Перехватывать и блокировать ли системный Esc, чтобы он не долетал до игры."""
+        if self.popup and self.popup.isVisible():
+            return True
+        if self.freeze_overlay and self.freeze_overlay.isVisible():
+            return True
+        if self.overlay and self.overlay.isVisible():
+            return True
+        return False
+
+    def _is_wheel_suppress_active(self, x: int = 0, y: int = 0) -> bool:
+        """Перехватывать и изолировать ли колесико мыши от фоновой игры."""
+        if not self.popup or not self.popup.isVisible():
+            return False
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QCursor
+        if x == 0 and y == 0:
+            pos = QCursor.pos()
+            x, y = pos.x(), pos.y()
+        # Если курсор находится над окном попапа (с запасом 6px для удобства)
+        return self.popup.frameGeometry().adjusted(-6, -6, 6, 6).contains(QPoint(x, y))
+
+    def _suspend_process(self, pid: int, app_name: str = ""):
+        """Приостанавливает процесс игры через NtSuspendProcess (чтобы FPS-игра не центрировала мышь)."""
+        if not pid or sys.platform != "win32":
+            return
+        import os
+        if pid == os.getpid() or pid <= 4:
+            return
+        ignore_apps = ("explorer.exe", "dwm.exe", "taskmgr.exe", "python.exe", "wordsnap.exe", "shellexperiencehost.exe")
+        if (app_name or "").lower() in ignore_apps:
+            return
+        if getattr(self, "_paused_process_handle", None):
+            return
+        try:
+            import ctypes
+            # PROCESS_SUSPEND_RESUME = 0x0800
+            h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
+            if h:
+                ctypes.windll.ntdll.NtSuspendProcess(h)
+                self._paused_process_handle = h
+        except Exception as e:
+            print("suspend process error:", e)
+
     def _check_autopause(self, app_name: str, win_title: str, pid: int):
         """Автоматическая пауза игры/приложения через NtSuspendProcess, если настроено."""
         target = (CONFIG.get("autopause_window") or "").strip().lower()
         if not target or not pid or sys.platform != "win32":
             return
         if target in (app_name or "").lower() or target in (win_title or "").lower():
-            try:
-                import ctypes
-                # PROCESS_SUSPEND_RESUME = 0x0800
-                h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
-                if h:
-                    ctypes.windll.ntdll.NtSuspendProcess(h)
-                    self._paused_process_handle = h
-            except Exception as e:
-                print("autopause suspend error:", e)
+            self._suspend_process(pid, app_name)
 
     def _resume_paused_process(self):
         """Возобновление работы приостановленного процесса."""
+        # Если оверлей заморозки всё ещё открыт, не возобновляем игру раньше времени
+        if self.freeze_overlay and self.freeze_overlay.isVisible():
+            return
         h = getattr(self, "_paused_process_handle", None)
         if h:
             try:
@@ -245,17 +307,24 @@ class Controller(QObject):
         self.tray_menu.addAction(t("Переводчик и словари")).triggered.connect(lambda: self._open_page(1))
         self.tray_menu.addAction(t("Настройки")).triggered.connect(lambda: self._open_page(2))
         self.tray_menu.addSeparator()
+        self.tray_menu.addAction(t("❤️ Поддержать")).triggered.connect(self._tray_donate)
         self.tray_menu.addAction(t("Выход")).triggered.connect(self.app.quit)
         self.tray.setContextMenu(self.tray_menu)
         self.tray.setToolTip(t("WordSnap — экранный переводчик и словарь"))
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
 
+    def _tray_donate(self):
+        from app.ui.thank_you_dialog import open_donation_support
+        open_donation_support(self.window if (self.window and self.window.isVisible()) else None)
+
     def _tray_activated(self, reason):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self._open_page(0)
 
     def _open_page(self, idx: int):
+        if self.window is None:
+            self._create_main_window(show=False)
         self.window.show()
         self.window.setWindowState(self.window.windowState() & ~Qt.WindowMinimized)
         self.window.raise_()
@@ -379,9 +448,23 @@ class Controller(QObject):
             self.popup.set_anki_state("idle" if self._anki_connected else "disconnected")
             self._check_anki_connection_async(word_to_check=w_clean)
 
+        import time
+        self._popup_open_time = time.time()
+
         order = [k for k in CONFIG.get("sources_order") if CONFIG.get("sources_enabled").get(k)]
         self.popup.open_at(sx + w // 2, sy + h, order, light=False)
         self.popup.raise_()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                HWND_TOPMOST = -1
+                SWP_NOMOVE = 0x0002
+                SWP_NOSIZE = 0x0001
+                SWP_SHOWWINDOW = 0x0040
+                ctypes.windll.user32.SetWindowPos(int(self.popup.winId()), HWND_TOPMOST, 0, 0, 0, 0,
+                                                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+            except Exception:
+                pass
         self.popup.activateWindow()
         self._popup_open = True
 
@@ -415,6 +498,8 @@ class Controller(QObject):
             light_bg = img.convert("L").resize((1, 1)).getpixel((0, 0)) > 140
         except Exception:
             light_bg = False
+        import time
+        self._popup_open_time = time.time()
         self.popup.open_at(x, y, order, light=light_bg)
         self._popup_open = True
 
@@ -792,6 +877,10 @@ class Controller(QObject):
         threading.Thread(target=worker, daemon=True).start()
 
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--import-dict":
+        from app.dictionaries import run_cli_import
+        sys.exit(run_cli_import(sys.argv[2]))
+
     # Windows показывает в панели задач иконку python.exe, пока у процесса нет
     # своего AppUserModelID. Задаём его — тогда таскбар берёт иконку окна.
     if sys.platform == "win32":
@@ -803,6 +892,8 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("WordSnap")
+    from PySide6.QtGui import QFont
+    app.setFont(QFont("Segoe UI", 10))
     from app.ui.theme import apply_palette
     apply_palette(app)                  # палитра под выбранную тему (важно для светлой)
     app.setWindowIcon(make_app_icon())  # иконка приложения (панель задач)
@@ -810,6 +901,12 @@ def main():
     ctl = Controller(app)
     ctl.bridge.error.connect(lambda m: ctl.tray.showMessage("WordSnap", m,
                                                             QSystemTrayIcon.Warning, 4000))
+
+    def _on_about_to_quit():
+        if ctl.window is not None:
+            from app.ui.theme import save_window_size
+            save_window_size("main_window", ctl.window, save_maximized=True, save_pos=True)
+    app.aboutToQuit.connect(_on_about_to_quit)
     import signal
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     sig_timer = QTimer()
@@ -821,5 +918,6 @@ def main():
         sys.exit(0)
 
 if __name__ == "__main__":
-    print("Starting WordSnap...")
+    if "--import-dict" not in sys.argv:
+        print("Starting WordSnap...")
     main()

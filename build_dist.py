@@ -17,7 +17,7 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 APP_NAME = "WordSnap"
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(ROOT_DIR, "dist", APP_NAME)
 RELEASE_DIR = os.path.join(ROOT_DIR, "release")
@@ -86,7 +86,7 @@ def make_clean_settings() -> dict:
         "gemini_api_key": "",
         "gemini_model": "auto",
         "first_setup_done": False,
-        "anki_enabled": True,
+        "anki_enabled": False,
         "anki_server": "http://127.0.0.1:8765",
         "anki_tags": "wordsnap",
         "anki_deck": "",

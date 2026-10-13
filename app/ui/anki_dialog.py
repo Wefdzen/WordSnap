@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 
 from ..config import CONFIG
 from ..anki import get_anki_client, ANKI_MARKERS
-from .theme import BG, BG_CARD, BG_PANEL, BG_HOVER, BORDER, ACCENT, TEXT, TEXT_DIM
+from .theme import BG, BG_CARD, BG_PANEL, BG_HOVER, BORDER, ACCENT, TEXT, TEXT_DIM, apply_native_window_theme, save_window_size, restore_window_size
 from .widgets import Hairline, svg_icon
 from .i18n import t
 
@@ -64,8 +64,9 @@ class AnkiCardsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("Настройка карточек Anki"))
-        self.setMinimumSize(660, 560)
-        self.resize(700, 600)
+        self.setMinimumSize(700, 640)
+        restore_window_size("anki_cards", self, 740, 750)
+        apply_native_window_theme(int(self.winId()))
         self.setStyleSheet(f"""
             QDialog {{ background: {BG}; }}
             QLabel {{ color: {TEXT}; font-family: 'Segoe UI', sans-serif; }}
@@ -261,6 +262,10 @@ class AnkiCardsDialog(QDialog):
         root.addLayout(bottom_bar)
 
         self.reload_data()
+
+    def closeEvent(self, e):
+        save_window_size("anki_cards", self)
+        super().closeEvent(e)
 
     def reload_data(self):
         """Загружает список колод и моделей из AnkiConnect."""

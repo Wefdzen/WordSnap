@@ -1,17 +1,19 @@
 """Вкладка «Переводчик и словари»: список источников слева (с порядком и тумблерами),
 настройки выбранного источника справа (включая офлайн-словари Yomitan)."""
 import html
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QFrame, QStackedWidget, QComboBox,
                                QPushButton, QFileDialog, QAbstractItemView, QLineEdit,
-                               QTextBrowser, QMessageBox, QApplication, QScrollArea)
+                               QTextBrowser, QMessageBox, QApplication, QScrollArea, QDialog)
 
 from ..config import CONFIG, LANGS
 from ..dictionaries import DICTIONARIES, dict_key, normalize_key
 from .widgets import ToggleSwitch, SettingRow, flag_icon, Badge
 from .theme import TEXT_DIM, ACCENT, ROW_HOVER, ROW_SEL, BG_CARD, BORDER, TEXT
 from .i18n import t
+from .dict_installer import DictionaryInstallDialog
 
 BUILTIN_SOURCES = {
     "translator_pro": ("Переводчик", "✦",
@@ -83,6 +85,12 @@ class DictsPage(QWidget):
         b.setCursor(Qt.PointingHandCursor)
         b.clicked.connect(self._install_dict)
         ll.addWidget(b, 0, Qt.AlignLeft)
+
+        b_dl = QPushButton(t("🌐  Скачать словари (Wiktionary / Yomitan)")); b_dl.setObjectName("Flat")
+        b_dl.setCursor(Qt.PointingHandCursor)
+        b_dl.setStyleSheet("color: #60cdff; text-align: left; padding: 2px 4px; font-size: 11.5px;")
+        b_dl.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://yomidevs.github.io/wiktionary-to-yomitan/download/")))
+        ll.addWidget(b_dl, 0, Qt.AlignLeft)
         root.addWidget(left, 4)
 
         # ---------- справа ----------
@@ -203,9 +211,9 @@ class DictsPage(QWidget):
         if not file_path:
             return
 
-        try:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            res = DICTIONARIES.import_zip(file_path)
+        dlg = DictionaryInstallDialog(self, file_path)
+        if dlg.exec() == QDialog.Accepted and dlg.result:
+            res = dlg.result
             k = dict_key(res["id"])
             order = list(CONFIG.get("sources_order", []))
             if k not in order:
@@ -215,7 +223,6 @@ class DictsPage(QWidget):
             en[k] = True
             CONFIG.set("sources_enabled", en)
 
-            QApplication.restoreOverrideCursor()
             msg = t("Словарь «%s» успешно установлен!\nВсего загружено %s словарных статей.") % (res['title'], f"{res['term_count']:,}")
             QMessageBox.information(self, t("Словарь установлен"), msg)
             self._sync_and_populate()
@@ -225,9 +232,8 @@ class DictsPage(QWidget):
                 if self.list.item(i).data(Qt.UserRole) == k:
                     self.list.setCurrentRow(i)
                     break
-        except Exception as ex:
-            QApplication.restoreOverrideCursor()
-            msg = t("Не удалось импортировать словарь:\n%s") % str(ex)
+        elif dlg.error:
+            msg = t("Не удалось импортировать словарь:\n%s") % str(dlg.error)
             QMessageBox.critical(self, t("Ошибка установки словаря"), msg)
 
     def _delete_dict(self, dict_id: str):

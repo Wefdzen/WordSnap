@@ -13,9 +13,11 @@ from ..config import CONFIG, LANGS
 from ..anki import get_anki_client
 from ..gemini import fetch_active_groq_models, fetch_active_gemini_models, Groq, Gemini
 from .widgets import ToggleSwitch, SettingRow, flag_icon, FluentRadio
-from .theme import TEXT_DIM, ACCENT
+from .theme import TEXT_DIM, ACCENT, BG_CARD, BG_HOVER, BORDER, TEXT, apply_native_window_theme, save_window_size, restore_window_size
 from .i18n import t
 from .anki_dialog import AnkiCardsDialog
+from .hotkey_dialog import HotkeyRecordDialog
+from .thank_you_dialog import open_donation_support, APP_VERSION
 
 def section(title: str) -> QLabel:
     l = QLabel(title); l.setObjectName("SectionTitle")
@@ -28,7 +30,8 @@ class WindowPickerDialog(QDialog):
         self.key = key
         is_pause = (key == "autopause_window")
         self.setWindowTitle(t("Настройка целевого окна"))
-        self.resize(520, 500)
+        restore_window_size("window_picker", self, 520, 500)
+        apply_native_window_theme(int(self.winId()))
         lay = QVBoxLayout(self); lay.setContentsMargins(20, 20, 20, 20); lay.setSpacing(10)
 
         desc = (t("Укажите заголовок или имя процесса игры/приложения, которое нужно автоматически ставить на паузу:")
@@ -88,6 +91,10 @@ class WindowPickerDialog(QDialog):
         btn_bar.addWidget(btn_save)
 
         lay.addLayout(btn_bar)
+
+    def closeEvent(self, e):
+        save_window_size("window_picker", self)
+        super().closeEvent(e)
 
     def _load_processes(self):
         items = set()
@@ -269,10 +276,10 @@ class SettingsPage(QWidget):
         sw_auto.toggled.connect(self._set_autostart)
         v.addWidget(SettingRow("power.svg", t("Запускать при старте Windows"), right=sw_auto))
 
-        btn_wizard = QPushButton("🚀 " + t("Запустить мастер первоначальной настройки"))
+        btn_wizard = QPushButton(t("Запустить мастер первоначальной настройки"))
         btn_wizard.setCursor(Qt.PointingHandCursor)
         btn_wizard.clicked.connect(self._open_onboarding)
-        v.addWidget(SettingRow("paper-plane-top.svg", t("Быстрый старт"),
+        v.addWidget(SettingRow("rocket.svg", t("Быстрый старт"),
                                t("Пройти пошаговую настройку языка, темы, режима и ИИ заново."),
                                btn_wizard))
 
@@ -301,10 +308,53 @@ class SettingsPage(QWidget):
 
         # ============ Горячие клавиши ============
         v.addWidget(section(t("Горячие клавиши")))
-        self.key_edit = QKeySequenceEdit(QKeySequence(CONFIG.get("hotkey").replace("+", "+").title()))
-        self.key_edit.setFixedWidth(300)
-        self.key_edit.editingFinished.connect(self._save_hotkey)
-        v.addWidget(SettingRow("keyboard.svg", t("Горячая клавиша"), right=self.key_edit))
+        hotkey_right = QWidget()
+        hkh = QHBoxLayout(hotkey_right)
+        hkh.setContentsMargins(0, 0, 0, 0)
+        hkh.setSpacing(10)
+
+        cur_hk = CONFIG.get("hotkey", "alt+q").upper()
+        self.btn_hotkey = QPushButton(f"⌨  {cur_hk}")
+        self.btn_hotkey.setCursor(Qt.PointingHandCursor)
+        self.btn_hotkey.setMinimumWidth(120)
+        self.btn_hotkey.setStyleSheet(f"""
+            QPushButton {{
+                background: {BG_CARD};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 13px;
+                font-weight: 600;
+                color: {TEXT};
+            }}
+            QPushButton:hover {{
+                border-color: {ACCENT};
+                background: {BG_HOVER};
+            }}
+        """)
+        self.btn_hotkey.clicked.connect(self._open_hotkey_dialog)
+
+        self.btn_assign_hk = QPushButton(t("Назначить"))
+        self.btn_assign_hk.setCursor(Qt.PointingHandCursor)
+        self.btn_assign_hk.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT};
+                color: #ffffff;
+                font-weight: 600;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background: #50bcf0;
+            }}
+        """)
+        self.btn_assign_hk.clicked.connect(self._open_hotkey_dialog)
+
+        hkh.addWidget(self.btn_hotkey)
+        hkh.addWidget(self.btn_assign_hk)
+        v.addWidget(SettingRow("keyboard.svg", t("Горячая клавиша"), right=hotkey_right))
 
         mouse_right = QWidget(); mh = QHBoxLayout(mouse_right); mh.setSpacing(8)
         self.cb_mod = QComboBox()
@@ -430,7 +480,7 @@ class SettingsPage(QWidget):
         btn_config_anki.setCursor(Qt.PointingHandCursor)
         btn_config_anki.setFixedWidth(130)
         btn_config_anki.clicked.connect(self._open_anki_cards_dialog)
-        v.addWidget(SettingRow("paper-plane-top.svg", t("Настройка карточек Anki..."),
+        v.addWidget(SettingRow("file-export.svg", t("Настройка карточек Anki..."),
                                t("Выбор колоды (Deck), модели (Model) и сопоставление полей ({expression}, {glossary} и др.)."),
                                right=btn_config_anki))
 
@@ -502,6 +552,51 @@ class SettingsPage(QWidget):
                                t("«Авто» всегда использует самую новую и быструю модель Flash."),
                                self.cb_model))
 
+        # ============ Подвал настроек (Footer) ============
+        v.addSpacing(28)
+
+        footer = QWidget()
+        footer_lay = QHBoxLayout(footer)
+        footer_lay.setContentsMargins(0, 0, 0, 0)
+        footer_lay.setSpacing(10)
+        footer_lay.setAlignment(Qt.AlignCenter)
+
+        # Ссылка-кнопка "Поддержать разработчика"
+        btn_donate = QPushButton(f"❤️  {t('Поддержать разработчика')}")
+        btn_donate.setObjectName("FooterDonateBtn")
+        btn_donate.setCursor(Qt.PointingHandCursor)
+        btn_donate.setToolTip(t("Открыть страницу поддержки разработчика на DonationAlerts"))
+        btn_donate.setStyleSheet(f"""
+            #FooterDonateBtn {{
+                background: transparent;
+                border: none;
+                color: #ff6b81;
+                font-size: 13px;
+                font-weight: 600;
+                text-decoration: underline;
+                padding: 4px 6px;
+            }}
+            #FooterDonateBtn:hover {{
+                color: #ff8da1;
+            }}
+        """)
+        btn_donate.clicked.connect(lambda: open_donation_support(self.window()))
+        footer_lay.addWidget(btn_donate)
+
+        # Надпись "by wefdzen v1.2.0"
+        lbl_info = QLabel(f"•   by wefdzen v{APP_VERSION}")
+        lbl_info.setObjectName("FooterInfoLbl")
+        lbl_info.setStyleSheet(f"""
+            #FooterInfoLbl {{
+                color: {TEXT_DIM};
+                font-size: 13px;
+                font-weight: 500;
+            }}
+        """)
+        footer_lay.addWidget(lbl_info)
+
+        v.addWidget(footer)
+        v.addSpacing(16)
         v.addStretch(1)
 
     # ------------------------------------------------------------------
@@ -544,11 +639,15 @@ class SettingsPage(QWidget):
         b.clicked.connect(pick)
         return b
 
-    def _save_hotkey(self):
-        seq = self.key_edit.keySequence().toString()  # "Alt+Q"
-        if seq:
-            CONFIG.set("hotkey", seq.lower())
-            self.hotkeys_changed.emit()
+    def _open_hotkey_dialog(self):
+        cur = CONFIG.get("hotkey", "alt+q")
+        dlg = HotkeyRecordDialog(cur, self)
+        if dlg.exec() == QDialog.Accepted:
+            new_hk = dlg.get_hotkey()
+            if new_hk:
+                CONFIG.set("hotkey", new_hk)
+                self.btn_hotkey.setText(f"⌨  {new_hk.upper()}")
+                self.hotkeys_changed.emit()
 
     def _save_mouse(self):
         CONFIG.set("mouse_hotkey_modifier", self.cb_mod.currentData(), save=False)
@@ -611,6 +710,12 @@ class SettingsPage(QWidget):
         dlg.exec()
 
     def _check_anki_status(self):
+        if not self.sw_anki.isChecked():
+            self.lbl_anki_status.setText(
+                t("Статус: <span style='color:#999;'>Включите функцию интеграции с Anki</span>")
+            )
+            return
+
         self.lbl_anki_status.setText(
             t("Статус: <span style='color:#999;'>⏳ Проверка...</span>")
         )
@@ -625,6 +730,11 @@ class SettingsPage(QWidget):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_anki_check_done(self, ok: bool, msg: str):
+        if not self.sw_anki.isChecked():
+            self.lbl_anki_status.setText(
+                t("Статус: <span style='color:#999;'>Включите функцию интеграции с Anki</span>")
+            )
+            return
         if ok:
             self.lbl_anki_status.setText(
                 t("Статус: <span style='color:#4caf50; font-weight:600;'>Подключено (%s)</span>") % msg

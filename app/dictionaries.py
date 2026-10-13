@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 import zipfile
@@ -676,6 +677,9 @@ class DictionaryManager:
                             """, batch)
                             total_terms += len(batch)
 
+                        # Даём передышку потокам ОС и хукам мыши (отпускаем GIL)
+                        time.sleep(0.002)
+
                     # Записываем словарь в реестр
                     conn.execute("""
                         INSERT INTO dictionaries (id, title, revision, author, description,
@@ -936,3 +940,32 @@ def normalize_key(key: str) -> str:
     return key[5:] if key.startswith("dict:") else key
 
 DICTIONARIES = DictionaryManager()
+
+def run_cli_import(zip_path: str) -> int:
+    """Запуск импорта словаря из отдельного процесса CLI (для полной изоляции GIL и устранения лагов)."""
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    try:
+        def cb(cur, tot, name):
+            msg = json.dumps({"type": "progress", "current": cur, "total": tot, "name": name}, ensure_ascii=False)
+            sys.stdout.write(msg + "\n")
+            sys.stdout.flush()
+
+        res = DICTIONARIES.import_zip(zip_path, progress_callback=cb)
+        msg = json.dumps({"type": "done", "result": res}, ensure_ascii=False)
+        sys.stdout.write(msg + "\n")
+        sys.stdout.flush()
+        return 0
+    except Exception as e:
+        msg = json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False)
+        sys.stdout.write(msg + "\n")
+        sys.stdout.flush()
+        return 1
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        sys.exit(run_cli_import(sys.argv[1]))

@@ -4,19 +4,20 @@ import datetime
 import html
 import time
 
-from PySide6.QtCore import Qt, Signal, QSize, QUrl, QEvent
+from PySide6.QtCore import Qt, Signal, QSize, QUrl, QEvent, QPoint, QDate
 from PySide6.QtGui import QPixmap, QPainter, QColor, QDesktopServices
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
                                QPushButton, QListWidget, QListWidgetItem, QScrollArea,
                                QFrame, QComboBox, QSplitter, QSplitterHandle, QTextEdit,
                                QFileDialog, QMessageBox, QGridLayout, QSizePolicy,
-                               QDialog, QDialogButtonBox)
+                               QDialog, QDialogButtonBox, QMenu, QDateEdit)
 
 from ..config import CONFIG, flag_for, lang_name, LANGS
 from ..storage import WORDS
 from .. import tts
 from .widgets import Badge, Hairline, InfoBanner, Collapsible, flag_label, flag_icon, svg_icon
-from .theme import TEXT_DIM, ACCENT, BORDER, BG_CARD, ROW_HOVER, ROW_SEL, ICON
+from .theme import (TEXT_DIM, ACCENT, BORDER, BG_CARD, ROW_HOVER, ROW_SEL, ICON,
+                   apply_native_window_theme, save_window_size, restore_window_size)
 from .i18n import t
 
 CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"]
@@ -107,6 +108,101 @@ class GripHandle(QSplitterHandle):
 class GripSplitter(QSplitter):
     def createHandle(self):
         return GripHandle(self.orientation(), self)
+
+class DateRangeDialog(QDialog):
+    """Диалог выбора диапазона дат для фильтрации и выделения слов."""
+    def __init__(self, parent=None):
+        top_parent = parent.window() if parent else None
+        super().__init__(top_parent)
+        self.setWindowTitle(t("Выбор периода дат"))
+        self.setWindowFlags((self.windowFlags() | Qt.Dialog) & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowModality(Qt.WindowModal)
+        apply_native_window_theme(int(self.winId()))
+
+        self.setStyleSheet(f"""
+            QDialog {{ background: {BG_CARD}; color: {ICON}; }}
+            QLabel {{ color: {ICON}; font-size: 13px; }}
+            QDateEdit {{
+                background: {BG_CARD};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                padding: 6px 10px;
+                color: {ICON};
+                font-size: 13px;
+            }}
+            QPushButton#PrimaryBtn {{
+                background: {ACCENT};
+                color: #000000;
+                font-weight: 600;
+                border-radius: 4px;
+                padding: 6px 16px;
+                border: none;
+            }}
+            QPushButton#PrimaryBtn:hover {{
+                background: #79d6ff;
+            }}
+            QPushButton#SecondaryBtn {{
+                background: transparent;
+                color: {ICON};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                padding: 6px 14px;
+            }}
+            QPushButton#SecondaryBtn:hover {{
+                background: {ROW_HOVER};
+            }}
+        """)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 16)
+        lay.setSpacing(14)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.addWidget(QLabel(t("Начальная дата:")), 0, 0)
+        self.edit_start = QDateEdit()
+        self.edit_start.setCalendarPopup(True)
+        today = datetime.date.today()
+        seven_days_ago = today - datetime.timedelta(days=7)
+        self.edit_start.setDate(QDate(seven_days_ago.year, seven_days_ago.month, seven_days_ago.day))
+        grid.addWidget(self.edit_start, 0, 1)
+
+        grid.addWidget(QLabel(t("Конечная дата:")), 1, 0)
+        self.edit_end = QDateEdit()
+        self.edit_end.setCalendarPopup(True)
+        self.edit_end.setDate(QDate(today.year, today.month, today.day))
+        grid.addWidget(self.edit_end, 1, 1)
+        lay.addLayout(grid)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_cancel = QPushButton(t("Отмена"))
+        btn_cancel.setObjectName("SecondaryBtn")
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_ok = QPushButton(t("Выбрать"))
+        btn_ok.setObjectName("PrimaryBtn")
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addWidget(btn_ok)
+        lay.addLayout(btn_row)
+
+        self.setMinimumSize(360, 190)
+        restore_window_size("date_range_dialog", self, 360, 190)
+
+    def closeEvent(self, e):
+        save_window_size("date_range_dialog", self)
+        super().closeEvent(e)
+
+    def get_dates(self) -> tuple[datetime.date, datetime.date]:
+        s_qd = self.edit_start.date()
+        e_qd = self.edit_end.date()
+        s_date = datetime.date(s_qd.year(), s_qd.month(), s_qd.day())
+        e_date = datetime.date(e_qd.year(), e_qd.month(), e_qd.day())
+        return s_date, e_date
+
 
 class ScalableImage(QLabel):
     """Скриншот, который подстраивает размер под ширину панели (и не выше max_h),
@@ -230,6 +326,7 @@ class WordsPage(QWidget):
         self.edit_mode = False
         self._rows: dict[str, WordRow] = {}
         self._selected: set[str] = set()  # выбранные через Ctrl для удаления
+        self.sort_desc = True              # направление сортировки: True = убывание (↓), False = возрастание (↑)
         self._build()
         self.reload()
         # горячие клавиши вкладки «Слова» — ловим на уровне приложения, но реагируем
@@ -263,9 +360,9 @@ class WordsPage(QWidget):
             self._speak_current(); return True
         if k == Qt.Key_Delete:                                  # Delete — удалить
             self._delete_selected(); return True
-        if k == Qt.Key_Left:                                    # ← предыдущее
+        if k in (Qt.Key_Up, Qt.Key_Left):                                    # ↑ / ← предыдущее
             self._nav(-1); return True
-        if k == Qt.Key_Right:                                   # → следующее
+        if k in (Qt.Key_Down, Qt.Key_Right):                                  # ↓ / → следующее
             self._nav(1); return True
         return False
 
@@ -326,25 +423,39 @@ class WordsPage(QWidget):
         row1.addSpacing(16)
         row1.addWidget(self.stat_fav)
         row1.addSpacing(16)
-        row1.addWidget(action_btn("border-all.svg", t("Выделить всё"), self._select_all))
-        row1.addWidget(action_btn("recycle-bin.svg", t("Удалить"), self._delete_selected))
-        row1.addWidget(action_btn("paper-plane-top.svg", t("Экспорт"), self._export))
+        self.btn_select_all = action_btn("border-all.svg", t("Выбор и выделение слов"), self._show_select_menu)
+        row1.addWidget(self.btn_select_all)
+        row1.addWidget(action_btn("trash.svg", t("Удалить"), self._delete_selected))
+        row1.addWidget(action_btn("file-export.svg", t("Экспорт"), self._export))
         root.addLayout(row1)
 
         # --- ряд 2: фильтры (по содержимому, без обрезки) ---
         row2 = QHBoxLayout(); row2.setSpacing(8)
         self.lang_filter = filter_combo(185, 225)
         self.lang_filter.addItem(svg_icon("globe.svg", ICON, 16), t("  Все языки"), "")
-        self.source_filter = filter_combo(190, 225)    # длинные названия игр обрезаются внутри
+        self.source_filter = filter_combo(190, 230)
         self.source_filter.addItem(svg_icon("filter.svg", ICON, 16), t("  Все источники"), "")
-        self.sort_combo = filter_combo(165, 205)
+        self.sort_combo = filter_combo(135, 175)
         self.sort_combo.addItem(svg_icon("bars-sort.svg", ICON, 16), t("  По дате"), "date")
         self.sort_combo.addItem(svg_icon("bars-sort.svg", ICON, 16), t("  По уровню"), "level")
+
+        self.sort_dir_btn = QPushButton("↓")
+        self.sort_dir_btn.setObjectName("IconBtn")
+        self.sort_dir_btn.setFixedSize(30, 30)
+        self.sort_dir_btn.setCursor(Qt.PointingHandCursor)
+        self.sort_dir_btn.clicked.connect(self._toggle_sort_direction)
+        self._update_sort_dir_ui()
+
         self.level_filter = filter_combo(140, 175)
         self.level_filter.addItem(t("  Все уровни"), "")
         for c in (self.lang_filter, self.source_filter, self.sort_combo, self.level_filter):
-            c.currentIndexChanged.connect(self.reload)   # подключаем после наполнения
+            if c == self.sort_combo:
+                c.currentIndexChanged.connect(self._on_sort_changed)
+            else:
+                c.currentIndexChanged.connect(self.reload)
             row2.addWidget(c)
+            if c == self.sort_combo:
+                row2.addWidget(self.sort_dir_btn)
         # только избранное — компактная кнопка-звезда
         self.btn_fav = QPushButton("★"); self.btn_fav.setObjectName("IconBtn")
         self.btn_fav.setCheckable(True); self.btn_fav.setCursor(Qt.PointingHandCursor)
@@ -382,7 +493,7 @@ class WordsPage(QWidget):
         mode_row = QHBoxLayout(); mode_row.addStretch(1)
         self.btn_view = QPushButton(""); self.btn_edit = QPushButton("")
         self.btn_view.setIcon(svg_icon("eye.svg", ICON, 16))
-        self.btn_edit.setIcon(svg_icon("pencil.svg", ICON, 16))
+        self.btn_edit.setIcon(svg_icon("edit.svg", ICON, 16))
         self.btn_view_ul = Hairline(color=ACCENT); self.btn_edit_ul = Hairline(color=ACCENT)
         for b, ul, tip in ((self.btn_view, self.btn_view_ul, t("Режим просмотра")),
                            (self.btn_edit, self.btn_edit_ul, t("Режим редактирования"))):
@@ -438,15 +549,67 @@ class WordsPage(QWidget):
             s = _src_key(e)
             if s and s not in seen:
                 seen.add(s); srcs.append(s)
+
+        def src_icon(src_name: str):
+            src_lower = src_name.lower()
+            is_browser = (
+                any(b.lower() in src_lower or src_lower in b.lower() for b in _BROWSERS.values())
+                or any(k in src_lower for k in _BROWSERS.keys())
+                or "browser" in src_lower
+            )
+            if is_browser:
+                return svg_icon("browser.svg", ICON, 16)
+            return svg_icon("filter.svg", ICON, 16)
+
         rebuild(self.source_filter, t("  Все источники"), srcs, _pretty_src,
+                icon_fn=src_icon,
                 all_icon=svg_icon("filter.svg", ICON, 16))
 
         levels = [lv for lv in CEFR
                   if any((e.get("level") or "").upper() == lv for e in WORDS.items)]
         rebuild(self.level_filter, t("  Все уровни"), levels, lambda c: f"  {c}")
 
+        if hasattr(self, "sort_combo"):
+            cur_s = self.sort_combo.currentData() or "date"
+            self.sort_combo.blockSignals(True)
+            self.sort_combo.clear()
+            self.sort_combo.addItem(svg_icon("bars-sort.svg", ICON, 16), t("  По дате"), "date")
+            self.sort_combo.addItem(svg_icon("bars-sort.svg", ICON, 16), t("  По уровню"), "level")
+            idx_s = self.sort_combo.findData(cur_s)
+            self.sort_combo.setCurrentIndex(idx_s if idx_s >= 0 else 0)
+            self.sort_combo.blockSignals(False)
+            self._update_sort_dir_ui()
+
+    def _update_sort_dir_ui(self):
+        crit = self.sort_combo.currentData() if hasattr(self, "sort_combo") else "date"
+        if not hasattr(self, "sort_dir_btn"):
+            return
+        if self.sort_desc:
+            self.sort_dir_btn.setText("↓")
+            if crit == "level":
+                self.sort_dir_btn.setToolTip(t("От сложных к простым (C2 → A1)"))
+            else:
+                self.sort_dir_btn.setToolTip(t("Сначала новые (по убыванию)"))
+        else:
+            self.sort_dir_btn.setText("↑")
+            if crit == "level":
+                self.sort_dir_btn.setToolTip(t("От простых к сложным (A1 → C2)"))
+            else:
+                self.sort_dir_btn.setToolTip(t("Сначала старые (по возрастанию)"))
+
+    def _on_sort_changed(self):
+        self._update_sort_dir_ui()
+        self.reload()
+
+    def _toggle_sort_direction(self):
+        self.sort_desc = not self.sort_desc
+        self._update_sort_dir_ui()
+        self.reload()
+
     # ----------------------------------------------------------- список
     def reload(self):
+        if hasattr(self, "search"):
+            self.search.setPlaceholderText(t("Поиск"))
         self._refresh_filters()
         # очистить
         while self.list_lay.count() > 1:
@@ -479,8 +642,20 @@ class WordsPage(QWidget):
             return True
 
         items = [e for e in WORDS.items if match(e)]
-        if sort_by == "level":  # по уровню (A1→C2), внутри уровня — новые сверху
-            items.sort(key=lambda e: (_cefr_rank(e), -e.get("created", 0)))
+        if sort_by == "level":
+            if self.sort_desc:
+                # C2 -> A1
+                items.sort(key=lambda e: (-_cefr_rank(e) if _cefr_rank(e) < len(CEFR) else len(CEFR), -e.get("created", 0)))
+            else:
+                # A1 -> C2
+                items.sort(key=lambda e: (_cefr_rank(e), -e.get("created", 0)))
+        else: # date
+            if self.sort_desc:
+                # Сначала новые
+                items.sort(key=lambda e: -e.get("created", 0))
+            else:
+                # Сначала старые
+                items.sort(key=lambda e: e.get("created", 0))
 
         # считаем повторы по всему словарю (язык + начальная форма слова),
         # чтобы метку видеть даже когда дубликаты разнесены фильтром/сортировкой
@@ -652,9 +827,22 @@ class WordsPage(QWidget):
         # источник
         src = e.get("source_title") or e.get("source_app")
         if src:
+            src_lower = src.lower()
+            is_browser = (
+                any(b.lower() in src_lower or src_lower in b.lower() for b in _BROWSERS.values())
+                or any(k in src_lower for k in _BROWSERS.keys())
+                or "browser" in src_lower
+            )
+            icon_file = "browser.svg" if is_browser else "filter.svg"
+            s_row = QHBoxLayout(); s_row.setSpacing(6)
+            ico = QLabel(); ico.setPixmap(svg_icon(icon_file, TEXT_DIM, 14).pixmap(14, 14))
+            s_row.addWidget(ico)
             s = QLabel(f"{t('Найдено в')} <b>{html.escape(src)}</b>")
             s.setObjectName("Dim"); s.setTextFormat(Qt.RichText)
-            L.addWidget(s)
+            s_row.addWidget(s)
+            s_row.addStretch(1)
+            sw = QWidget(); sw.setLayout(s_row)
+            L.addWidget(sw)
         L.addStretch(1)
 
     def _render_edit(self, e: dict):
@@ -731,17 +919,90 @@ class WordsPage(QWidget):
         L.addStretch(1)
 
     # ------------------------------------------------------------ действия
-    def _select_all(self):
-        """Отметить/снять все видимые слова (для удаления)."""
+    def _show_select_menu(self):
+        """Всплывающее меню выбора диапазона слов для выделения."""
+        menu = QMenu(self.window() if hasattr(self, "window") else self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {BG_CARD};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 6px 24px 6px 12px;
+                color: {ICON};
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: {ROW_HOVER};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {BORDER};
+                margin: 4px 0;
+            }}
+        """)
+
+        act_all = menu.addAction(svg_icon("border-all.svg", ICON, 14), t("Все слова"))
+        act_today = menu.addAction(t("За сегодня"))
+        act_7d = menu.addAction(t("За последние 7 дней"))
+        act_30d = menu.addAction(t("За последние 30 дней"))
+        act_custom = menu.addAction(t("Выбрать диапазон дат..."))
+        menu.addSeparator()
+        act_clear = menu.addAction(svg_icon("trash.svg", ICON, 14), t("Снять выделение"))
+
+        pos = self.btn_select_all.mapToGlobal(QPoint(0, self.btn_select_all.height() + 2))
+        selected_action = menu.exec(pos)
+        if not selected_action:
+            return
+
+        if selected_action == act_all:
+            self._select_all_visible()
+        elif selected_action == act_today:
+            today = datetime.date.today()
+            self._apply_selection_filter(lambda e: datetime.date.fromtimestamp(e.get("created", 0)) == today)
+        elif selected_action == act_7d:
+            cutoff = time.time() - (7 * 86400)
+            self._apply_selection_filter(lambda e: e.get("created", 0) >= cutoff)
+        elif selected_action == act_30d:
+            cutoff = time.time() - (30 * 86400)
+            self._apply_selection_filter(lambda e: e.get("created", 0) >= cutoff)
+        elif selected_action == act_custom:
+            self._select_custom_range()
+        elif selected_action == act_clear:
+            self._clear_selection()
+
+    def _select_all_visible(self):
         if self._selected >= set(self._rows.keys()) and self._rows:
-            # уже все выбраны — снять выделение
-            for row in self._rows.values():
-                row.set_checked(False)
-            self._selected.clear()
+            self._clear_selection()
         else:
             for rid, row in self._rows.items():
                 row.set_checked(True)
                 self._selected.add(rid)
+
+    def _apply_selection_filter(self, predicate):
+        for rid, row in self._rows.items():
+            e = WORDS.get(rid)
+            if e and predicate(e):
+                row.set_checked(True)
+                self._selected.add(rid)
+            else:
+                row.set_checked(False)
+                self._selected.discard(rid)
+
+    def _select_custom_range(self):
+        dlg = DateRangeDialog(self.window() if hasattr(self, "window") else self)
+        if dlg.exec() == QDialog.Accepted:
+            s_date, e_date = dlg.get_dates()
+            self._apply_selection_filter(
+                lambda e: s_date <= datetime.date.fromtimestamp(e.get("created", 0)) <= e_date
+            )
+
+    def _clear_selection(self):
+        for row in self._rows.values():
+            row.set_checked(False)
+        self._selected.clear()
 
     def _delete_selected(self):
         ids = list(self._selected) if self._selected else \
@@ -824,7 +1085,7 @@ class WordsPage(QWidget):
             if s and s not in seen:
                 seen.add(s); srcs.append(s)
 
-        dlg = QDialog(self)
+        dlg = QDialog(self.window() if hasattr(self, "window") else self)
         dlg.setWindowTitle(t("Экспорт слов"))
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(20, 18, 20, 16); lay.setSpacing(8)

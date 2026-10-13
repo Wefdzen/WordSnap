@@ -100,7 +100,7 @@ DEFAULTS = {
     # --- Первый запуск ---
     "first_setup_done": False,
     # --- Anki (AnkiConnect) ---
-    "anki_enabled": True,
+    "anki_enabled": False,
     "anki_server": "http://127.0.0.1:8765",
     "anki_tags": "wordsnap",
     "anki_deck": "",
@@ -119,7 +119,16 @@ def flag_for(lang: str) -> str:
             return fl
     return "🌐"
 
+LANGS_EN = {
+    "ru": "Russian", "en": "English", "de": "German",
+    "fr": "French", "es": "Spanish", "ja": "Japanese",
+    "zh": "Chinese", "ko": "Korean", "uk": "Ukrainian"
+}
+
 def lang_name(lang: str) -> str:
+    if CONFIG.get("ui_lang", "ru") == "en":
+        if lang in LANGS_EN:
+            return LANGS_EN[lang]
     for code, name, _ in LANGS:
         if code == lang:
             return name

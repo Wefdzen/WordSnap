@@ -5,9 +5,153 @@
 значения уже выбранной темы. Смена темы применяется после перезапуска приложения.
 
 ВАЖНО: всплывающее окно перевода (popup.py) сюда не завязано — оно само выбирает
-светлый/тёмный вид по яркости фона под курсором.
 """
+import sys
 from ..config import CONFIG
+
+
+def is_windows_11() -> bool:
+    """Проверяет, работает ли приложение на Windows 11 (билд 22000+)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        return sys.getwindowsversion().build >= 22000
+    except Exception:
+        return False
+
+
+def is_windows_10_or_newer() -> bool:
+    """Проверяет, работает ли приложение на Windows 10 или более новой версии."""
+    if sys.platform != "win32":
+        return False
+    try:
+        return sys.getwindowsversion().major >= 10
+    except Exception:
+        return False
+
+
+def apply_native_window_theme(hwnd: int):
+    """Настраивает тёмный заголовок и системные эффекты DWM для Windows 10 и 11."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 (Win10 18985+ и Win11), 19 (Win10 17763-18984)
+        for attr in (20, 19):
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int)
+                )
+            except Exception:
+                pass
+
+        # Windows 11 (билд 22000+): нативное скругление углов диалогов и окон
+        if is_windows_11():
+            try:
+                # DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 33, ctypes.byref(ctypes.c_int(2)), ctypes.sizeof(ctypes.c_int)
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def save_window_size(name: str, widget, save_maximized: bool = False, save_pos: bool = False):
+    """Сохраняет текущий размер (и состояние разворачивания/позицию) окна в конфигурацию."""
+    try:
+        from ..config import CONFIG
+        sizes = dict(CONFIG.get("window_sizes") or {})
+
+        is_max = save_maximized and hasattr(widget, "isMaximized") and bool(widget.isMaximized())
+
+        # Если окно развернуто, сохраняем геометрию до разворачивания, чтобы при сбросе не получить 1920x1080
+        if is_max:
+            normal_size = getattr(widget, "_last_normal_size", None)
+            if normal_size is not None and normal_size.width() >= 300 and normal_size.height() >= 150:
+                w = normal_size.width()
+                h = normal_size.height()
+            elif hasattr(widget, "normalGeometry"):
+                norm = widget.normalGeometry()
+                if norm.isValid() and not norm.isEmpty() and (norm.width() < widget.width() or norm.height() < widget.height()):
+                    w = norm.width()
+                    h = norm.height()
+                else:
+                    w = widget.width()
+                    h = widget.height()
+            else:
+                w = widget.width()
+                h = widget.height()
+
+            normal_pos = getattr(widget, "_last_normal_pos", None)
+            if normal_pos is not None:
+                x = normal_pos.x()
+                y = normal_pos.y()
+            elif hasattr(widget, "normalGeometry"):
+                norm = widget.normalGeometry()
+                x = norm.x()
+                y = norm.y()
+            else:
+                x = widget.x()
+                y = widget.y()
+        else:
+            w = widget.width()
+            h = widget.height()
+            x = widget.x()
+            y = widget.y()
+
+        info = {"w": w, "h": h}
+        if save_pos and x is not None and y is not None:
+            info["x"] = x
+            info["y"] = y
+        if save_maximized and hasattr(widget, "isMaximized"):
+            info["maximized"] = is_max
+        sizes[name] = info
+        CONFIG.set("window_sizes", sizes, save=True)
+    except Exception:
+        pass
+
+
+def restore_window_size(name: str, widget, default_w: int, default_h: int, can_maximize: bool = False, restore_pos: bool = False):
+    """Восстанавливает сохранённый размер и позицию окна из конфигурации."""
+    try:
+        from ..config import CONFIG
+        from PySide6.QtCore import QTimer, QRect
+        from PySide6.QtGui import QGuiApplication
+        sizes = CONFIG.get("window_sizes") or {}
+        info = sizes.get(name)
+        if isinstance(info, dict):
+            w = info.get("w", default_w)
+            h = info.get("h", default_h)
+            if isinstance(w, int) and isinstance(h, int) and w >= 300 and h >= 150:
+                widget.resize(w, h)
+            else:
+                w, h = default_w, default_h
+                widget.resize(default_w, default_h)
+
+            if restore_pos and "x" in info and "y" in info:
+                x = info.get("x")
+                y = info.get("y")
+                if isinstance(x, int) and isinstance(y, int):
+                    rect = QRect(x, y, w, h)
+                    visible = False
+                    for screen in QGuiApplication.screens():
+                        avail = screen.availableGeometry()
+                        if avail.intersects(rect):
+                            inter = avail.intersected(rect)
+                            if inter.width() >= 100 and inter.height() >= 100:
+                                visible = True
+                                break
+                    if visible:
+                        widget.move(x, y)
+
+            if can_maximize and info.get("maximized"):
+                QTimer.singleShot(0, widget.showMaximized)
+        else:
+            widget.resize(default_w, default_h)
+    except Exception:
+        widget.resize(default_w, default_h)
 
 # ---------------------------------------------------------------- палитры
 DARK = dict(
@@ -27,7 +171,7 @@ LIGHT = dict(
 
 
 def _windows_prefers_light() -> bool:
-    """Системная тема Windows: AppsUseLightTheme (1 — светлая, 0 — тёмная)."""
+    """Системная тема Windows: AppsUseLightTheme (1 - светлая, 0 - тёмная)."""
     try:
         import winreg
         key = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
