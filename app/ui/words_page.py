@@ -435,7 +435,7 @@ class WordsPage(QWidget):
         self.lang_filter.addItem(svg_icon("globe.svg", ICON, 16), t("  Все языки"), "")
         self.source_filter = filter_combo(190, 230)
         self.source_filter.addItem(svg_icon("filter.svg", ICON, 16), t("  Все источники"), "")
-        self.sort_combo = filter_combo(135, 175)
+        self.sort_combo = filter_combo(145, 185)
         self.sort_combo.addItem(svg_icon("bars-sort.svg", ICON, 16), t("  По дате"), "date")
         self.sort_combo.addItem(svg_icon("bars-sort.svg", ICON, 16), t("  По уровню"), "level")
 

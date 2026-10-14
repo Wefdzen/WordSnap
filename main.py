@@ -621,7 +621,7 @@ class Controller(QObject):
                     def do_offline():
                         try:
                             d_id = normalize_key(src_key)
-                            res = DICTIONARIES.lookup(w_clean, d_id)
+                            res = DICTIONARIES.lookup(w_clean, d_id, context=sentence)
                             self.bridge.offline_dict_ready.emit(src_key, res)
                             if res and self._pending_entry is not None:
                                 if "offline_entries" not in self._pending_entry:

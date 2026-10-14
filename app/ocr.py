@@ -46,6 +46,63 @@ def preprocess_for_game_ocr(image: Image.Image, scale: float = 2.0) -> tuple[Ima
     sharp = contrast.filter(ImageFilter.SHARPEN)
     return sharp, scale
 
+def check_windows_ocr_language(lang_code: str) -> tuple[bool, str, list[str]]:
+    """Проверяет доступность Windows OCR для указанного языка (код 'en', 'ja', 'zh'...).
+    Возвращает (is_available, tag, available_list)."""
+    lang_tag = OCR_LANG_TAGS.get(lang_code, ("en-US", "eng"))[0]
+    avail = []
+    try:
+        try:
+            from winrt.windows.media.ocr import OcrEngine as WinOcr
+            from winrt.windows.globalization import Language
+        except ImportError:
+            from winsdk.windows.media.ocr import OcrEngine as WinOcr
+            from winsdk.windows.globalization import Language
+
+        for lng in WinOcr.available_recognizer_languages:
+            avail.append(lng.display_name)
+
+        engine = None
+        try:
+            engine = WinOcr.try_create_from_language(Language(lang_tag))
+        except Exception:
+            pass
+        if engine is None and "-" in lang_tag:
+            try:
+                engine = WinOcr.try_create_from_language(Language(lang_tag.split("-")[0]))
+            except Exception:
+                pass
+        return (engine is not None, lang_tag, avail)
+    except Exception:
+        return (False, lang_tag, avail)
+
+
+def get_ocr_missing_instructions(lang_tag: str, avail_names: list[str]) -> str:
+    """Возвращает подробную двуязычную инструкцию по установке OCR для языка."""
+    from .config import CONFIG
+    is_en = CONFIG.get("ui_lang", "ru") == "en"
+    avail_str = ", ".join(avail_names) if avail_names else ("none" if is_en else "нет")
+
+    if is_en:
+        return (
+            f"Windows OCR for language «{lang_tag}» is not installed.\n\n"
+            "How to install:\n"
+            "1. Open Windows Settings → Time & language → Language & region → Add a language.\n"
+            "2. Select your language (the OCR package is installed automatically by Windows; if not, check the 'Optical character recognition' box).\n"
+            "3. 💡 Tip: After installation, you can remove the keyboard layout if you don't need it — the OCR engine will remain in Windows!\n\n"
+            f"Currently available OCR languages in system: {avail_str}."
+        )
+    else:
+        return (
+            f"Windows OCR для языка «{lang_tag}» не установлен.\n\n"
+            "Как установить:\n"
+            "1. Откройте Параметры Windows → Время и язык → Язык и регион → Добавить язык.\n"
+            "2. Выберите нужный язык (компонент OCR скачивается автоматически; если не скачался — проверьте наличие галочки «Распознавание текста»).\n"
+            "3. 💡 Совет: После установки саму раскладку клавиатуры можно удалить — модуль OCR останется в системе!\n\n"
+            f"Сейчас доступны в системе: {avail_str}."
+        )
+
+
 # ---------------------------------------------------------------- Windows OCR
 class WindowsOcrEngine:
     name = "Рекомендуемый (Windows OCR)"
@@ -105,21 +162,21 @@ class WindowsOcrEngine:
             engine = WinOcr.try_create_from_language(Language(self.lang_tag))
         except Exception:
             pass
+        if engine is None and "-" in self.lang_tag:
+            try:
+                engine = WinOcr.try_create_from_language(Language(self.lang_tag.split("-")[0]))
+            except Exception:
+                pass
+
         if engine is None:
-            # Запрошенный язык не установлен. Раньше тут была тихая подмена на
-            # системный язык — но он распознаёт чужой текст (например японский)
-            # как мусор. Поэтому честно сообщаем, как доустановить пакет.
+            # Запрошенный язык не установлен. Сообщаем понятную инструкцию на языке пользователя.
             avail = []
             try:
                 for lng in WinOcr.available_recognizer_languages:
                     avail.append(lng.display_name)
             except Exception:
                 pass
-            msg = (f"Windows OCR для языка «{self.lang_tag}» не установлен.\n"
-                   "Поставьте его: Параметры Windows → Время и язык → Язык и регион → "
-                   "добавьте язык, затем в его «Параметрах языка» включите распознавание текста.")
-            if avail:
-                msg += "\nСейчас доступны: " + ", ".join(avail) + "."
+            msg = get_ocr_missing_instructions(self.lang_tag, avail)
             raise RuntimeError(msg)
 
         result = await engine.recognize_async(bitmap)

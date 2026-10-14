@@ -53,3 +53,6 @@ assets/svg/_png/
 *.log
 *.tmp
 scratch/
+
+# Web landing page
+web/

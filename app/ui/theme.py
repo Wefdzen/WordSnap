@@ -277,11 +277,11 @@ QLineEdit, QTextEdit, QPlainTextEdit {{
 }}
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{ border-bottom: 2px solid {p['ACCENT']}; }}
 QComboBox {{
-    background: {p['BG_CARD']}; border: 1px solid {p['BORDER']}; border-radius: 4px; padding: 6px 28px 6px 10px;
+    background: {p['BG_CARD']}; border: 1px solid {p['BORDER']}; border-radius: 4px; padding: 6px 34px 6px 10px;
 }}
 QComboBox:hover {{ background: {p['BG_HOVER']}; }}
-QComboBox::drop-down {{ border: none; width: 26px; }}
-QComboBox::down-arrow {{ width: 12px; height: 12px; margin-right: 8px; }}
+QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; border: none; width: 22px; }}
+QComboBox::down-arrow {{ width: 12px; height: 12px; margin-right: 6px; }}
 QComboBox QAbstractItemView {{
     background: {p['BG_CARD']}; border: 1px solid {p['BORDER']}; selection-background-color: {p['BG_HOVER']};
     selection-color: {p['TEXT']}; outline: none; padding: 2px;

@@ -285,7 +285,7 @@ class DictsPage(QWidget):
             sw = ToggleSwitch(tp["hide_in_dict_mode"])
             sw.toggled.connect(lambda on: (tp.__setitem__("hide_in_dict_mode", on),
                                            CONFIG.set("translator_pro", tp)))
-            v.addWidget(SettingRow("🙈", t("Скрыть перевод в режиме словаря"),
+            v.addWidget(SettingRow("hide.svg", t("Скрыть перевод в режиме словаря"),
                                    t("Перевод будет скрыт под спойлером."), sw))
         elif key == "looktionary_pro":
             cb1 = lang_combo(lk["def_lang"])
@@ -301,7 +301,7 @@ class DictsPage(QWidget):
             sw = ToggleSwitch(lk["hide_word_translation"])
             sw.toggled.connect(lambda on: (lk.__setitem__("hide_word_translation", on),
                                            CONFIG.set("looktionary_pro", lk)))
-            v.addWidget(SettingRow("🙈", t("Скрыть перевод слова"),
+            v.addWidget(SettingRow("hide.svg", t("Скрыть перевод слова"),
                                    t("Перевод будет скрыт под спойлером."), sw))
         v.addStretch(1)
         return host

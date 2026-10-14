@@ -17,7 +17,7 @@ _EN = {
 
     # --- вкладки ---
     "Слова": "Words",
-    "Переводчик и словари": "Translator & dictionaries",
+    "Переводчик и словари": "Translator && dictionaries",
     "Настройки": "Settings",
 
     # --- настройки: секции ---
@@ -65,9 +65,30 @@ _EN = {
     "Язык распознавания": "Recognition language",
     "Выберите язык, соответствующий тексту на экране. Иначе распознавание может быть неправильным.":
         "Pick the language matching the on-screen text, otherwise recognition may be wrong.",
+    "Проверить OCR": "Check OCR",
+    "Проверить": "Check",
+    "Установлен": "Installed",
+    "Не установлен": "Not installed",
+    "✓ Установлен": "✓ Installed",
+    "✗ Не установлен": "✗ Not installed",
+    "Проверка Windows OCR": "Windows OCR Check",
+    "Открыть параметры Windows": "Open Windows Settings",
+    "Windows OCR для языка «%s» установлен и готов к работе!": "Windows OCR for «%s» is installed and ready to use!",
+    "Tesseract найден в системе!": "Tesseract found in system!",
+    "Tesseract OCR не найден в PATH.": "Tesseract OCR not found in system PATH.",
+    "✗ Не найден": "✗ Not found",
 
     # --- настройки: игры ---
     "Делать оверлей активным окном": "Make overlay the active window",
+    "Делать оверлей активным окном  ⓘ": "Make overlay the active window  ⓘ",
+    "Словарь «%s» успешно установлен!\nВсего загружено %s словарных статей.":
+        "Dictionary «%s» successfully installed!\nTotal %s term entries imported.",
+    "Словарь установлен": "Dictionary installed",
+    "Не удалось импортировать словарь:\n%s": "Failed to import dictionary:\n%s",
+    "Ошибка установки словаря": "Dictionary installation error",
+    "Вы уверены, что хотите удалить словарь «%s»?\nВсе словарные статьи будут стёрты.":
+        "Are you sure you want to delete dictionary «%s»?\nAll term entries will be permanently deleted.",
+    "Удаление словаря": "Delete dictionary",
     "Одни игры работают лучше при включённой функции, другие — при выключенной.":
         "Some games work better with it on, others with it off.",
     "Заморозка экрана": "Freeze screen",

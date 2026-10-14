@@ -386,23 +386,35 @@ class SettingsPage(QWidget):
         self.cb_ocr.setMinimumHeight(48)  # две строки текста должны помещаться целиком
         v.addWidget(SettingRow("microchip.svg", t("Движок OCR"), right=self.cb_ocr))
 
+        lang_box = QWidget()
+        lang_lay = QHBoxLayout(lang_box)
+        lang_lay.setContentsMargins(0, 0, 0, 0)
+        lang_lay.setSpacing(8)
+
         self.cb_lang = QComboBox()
         for code, name, fl in LANGS:
             self.cb_lang.addItem(flag_icon(code), f"  {name}", code)
             if code == CONFIG.get("ocr_lang"):
                 self.cb_lang.setCurrentIndex(self.cb_lang.count() - 1)
-        self.cb_lang.currentIndexChanged.connect(
-            lambda: CONFIG.set("ocr_lang", self.cb_lang.currentData()))
-        self.cb_lang.setFixedWidth(220)
+        self.cb_lang.currentIndexChanged.connect(self._on_ocr_lang_changed)
+        self.cb_lang.setFixedWidth(210)
+        lang_lay.addWidget(self.cb_lang)
+
+        self.btn_check_ocr = QPushButton(t("Проверить OCR"))
+        self.btn_check_ocr.setCursor(Qt.PointingHandCursor)
+        self.btn_check_ocr.setFixedHeight(34)
+        self.btn_check_ocr.clicked.connect(self._check_ocr_status)
+        lang_lay.addWidget(self.btn_check_ocr)
+
         v.addWidget(SettingRow("languages-world.svg", t("Язык распознавания"),
                                t("Выберите язык, соответствующий тексту на экране. "
-                                 "Иначе распознавание может быть неправильным."), self.cb_lang))
+                                 "Иначе распознавание может быть неправильным."), lang_box))
 
         # ===== Взаимодействие с играми и приложениями =====
         v.addWidget(section(t("Взаимодействие с играми и приложениями")))
         sw1 = ToggleSwitch(CONFIG.get("overlay_active_window"))
         sw1.toggled.connect(lambda on: CONFIG.set("overlay_active_window", on))
-        v.addWidget(SettingRow("layers.svg", t("Делать оверлей активным окном  ⓘ"),
+        v.addWidget(SettingRow("layers.svg", f"{t('Делать оверлей активным окном')}  ⓘ",
                                t("Одни игры работают лучше при включённой функции, другие — при "
                                  "выключенной."), sw1))
         sw2 = ToggleSwitch(CONFIG.get("freeze_screen"))
@@ -929,6 +941,54 @@ class SettingsPage(QWidget):
             )
             self._populate_groq_models()
             self._populate_gemini_models()
+
+    def _on_ocr_lang_changed(self):
+        CONFIG.set("ocr_lang", self.cb_lang.currentData())
+        if hasattr(self, "btn_check_ocr"):
+            self.btn_check_ocr.setText(t("Проверить OCR"))
+            self.btn_check_ocr.setStyleSheet("")
+            self.btn_check_ocr.setToolTip("")
+
+    def _check_ocr_status(self):
+        engine_type = CONFIG.get("ocr_engine", "auto")
+        lang_code = self.cb_lang.currentData() or "en"
+        from ..ocr import check_windows_ocr_language, get_ocr_missing_instructions
+
+        if engine_type == "tesseract":
+            import shutil
+            has_tess = shutil.which("tesseract") is not None
+            if has_tess:
+                self.btn_check_ocr.setText("✓ OK")
+                self.btn_check_ocr.setStyleSheet("color: #4caf50; font-weight: bold; border: 1px solid #4caf50;")
+                self.btn_check_ocr.setToolTip(t("Tesseract найден в системе!"))
+            else:
+                self.btn_check_ocr.setText(t("✗ Не найден"))
+                self.btn_check_ocr.setStyleSheet("color: #e0564b; font-weight: bold; border: 1px solid #e0564b;")
+                self.btn_check_ocr.setToolTip(t("Tesseract OCR не найден в PATH."))
+            return
+
+        ok, tag, avail = check_windows_ocr_language(lang_code)
+        if ok:
+            self.btn_check_ocr.setText(f"✓ {t('Установлен')}")
+            self.btn_check_ocr.setStyleSheet("color: #4caf50; font-weight: bold; border: 1px solid #4caf50;")
+            self.btn_check_ocr.setToolTip(t("Windows OCR для языка «%s» установлен и готов к работе!") % tag)
+        else:
+            self.btn_check_ocr.setText(f"✗ {t('Не установлен')}")
+            self.btn_check_ocr.setStyleSheet("color: #e0564b; font-weight: bold; border: 1px solid #e0564b;")
+            msg = get_ocr_missing_instructions(tag, avail)
+            self.btn_check_ocr.setToolTip(msg)
+
+            box = QMessageBox(self)
+            box.setWindowTitle(t("Проверка Windows OCR"))
+            box.setIcon(QMessageBox.Warning)
+            box.setText(msg)
+            btn_open_win = box.addButton(t("Открыть параметры Windows"), QMessageBox.ActionRole)
+            box.addButton(QMessageBox.Close)
+            box.exec()
+            if box.clickedButton() == btn_open_win:
+                if sys.platform == "win32":
+                    import os
+                    os.system("start ms-settings:regionlanguage")
 
 
 

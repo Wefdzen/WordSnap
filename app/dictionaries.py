@@ -711,16 +711,29 @@ class DictionaryManager:
         query += " ORDER BY t.score DESC, t.seq ASC"
         return conn.execute(query, params).fetchall()
 
-    def lookup(self, word: str, dict_id: str | None = None) -> list[dict]:
+    def lookup(self, word: str, dict_id: str | None = None, context: str | None = None) -> list[dict]:
         """Поиск слова во всех включённых офлайн-словарях (или в конкретном dict_id).
         Поддерживает деинфлекцию/лемматизацию в точности как в Yomitan:
         - удовлетворяет запросы по непрямым формам (satisfying -> satisfie, satisfy)
         - находит степени сравнения (greater -> great)
         - разрешает non-lemma ссылки словарей на базовые словарные статьи
+        - поддерживает префиксное сканирование слитных слов (Yomitan Longest Prefix Match)
         - возвращает полноценные статьи с грамматическими тегами инфлекции (ing, s, er...)."""
         w = word.strip().lower()
         if not w:
             return []
+
+        # Для слитного восточноазиатского текста (японский/китайский):
+        # проверяем составные слова от самого длинного к короткому (алгоритм Yomitan)
+        if context and word in context and len(word) <= 3:
+            idx = context.find(word)
+            sub = context[idx:idx + 12]
+            sub_clean = re.split(r'[\s.,!?;:…«»\(\)\[\]{}—\-\'"_]', sub)[0]
+            for length in range(len(sub_clean), len(word), -1):
+                cand = sub_clean[:length]
+                cand_res = self.lookup(cand, dict_id)
+                if cand_res:
+                    return cand_res
 
         with _DB_LOCK:
             with self._get_conn() as conn:

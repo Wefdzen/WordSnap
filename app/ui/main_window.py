@@ -83,7 +83,8 @@ class TitleBar(QFrame):
         for i, name in enumerate((t("Слова"), t("Переводчик и словари"), t("Настройки"))):
             host = QWidget(); hv = QVBoxLayout(host)
             hv.setContentsMargins(8, 0, 8, 5); hv.setSpacing(0)
-            b = QPushButton(name); b.setObjectName("TabButton")
+            clean_name = name.replace("&", "&&") if "&&" not in name else name
+            b = QPushButton(clean_name); b.setObjectName("TabButton")
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _, idx=i: self.win.set_page(idx))
             hv.addWidget(b)
