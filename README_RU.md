@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="100" alt="WordSnap">
 </p>
 
-<h1 align="center">WordSnap v1.2.0</h1>
+<h1 align="center">WordSnap v1.3.0</h1>
 
 <p align="center">
   <b>Экранный OCR-переводчик, офлайн-словарь Yomitan и карточки Anki для Windows.</b><br>
@@ -37,8 +37,8 @@
 
 | Версия | Описание | Файл |
 |---|---|---|
-| **Установщик (Setup)** | Стандартный мастер установки с ярлыками и деинсталлятором | [`WordSnap-1.2.0-Setup.exe`](../../releases) |
-| **Портативная (Portable)** | Не требует установки, работает из любой папки или с флешки | [`WordSnap-1.2.0-Portable.zip`](../../releases) |
+| **Установщик (Setup)** | Стандартный мастер установки с ярлыками и деинсталлятором | [`WordSnap-1.3.0-Setup.exe`](../../releases) |
+| **Портативная (Portable)** | Не требует установки, работает из любой папки или с флешки | [`WordSnap-1.3.0-Portable.zip`](../../releases) |
 
 ---
 

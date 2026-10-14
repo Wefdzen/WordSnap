@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="100" alt="WordSnap">
 </p>
 
-<h1 align="center">WordSnap v1.2.0</h1>
+<h1 align="center">WordSnap v1.3.0</h1>
 
 <p align="center">
   <b>Instant on-screen OCR translator, offline Yomitan dictionary & Anki study cards for Windows.</b><br>
@@ -37,8 +37,8 @@ Pre-built binaries are available in **[Releases](../../releases)**:
 
 | Distribution | Description | Download |
 |---|---|---|
-| **Installer (Setup)** | Standard Windows installer with shortcuts and uninstaller | [`WordSnap-1.2.0-Setup.exe`](../../releases) |
-| **Portable (ZIP)** | Zero-installation, extract and run anywhere (e.g. USB drive) | [`WordSnap-1.2.0-Portable.zip`](../../releases) |
+| **Installer (Setup)** | Standard Windows installer with shortcuts and uninstaller | [`WordSnap-1.3.0-Setup.exe`](../../releases) |
+| **Portable (ZIP)** | Zero-installation, extract and run anywhere (e.g. USB drive) | [`WordSnap-1.3.0-Portable.zip`](../../releases) |
 
 ---
 

@@ -72,6 +72,8 @@ class Controller(QObject):
         super().__init__()
         self.app = app
         self.window: MainWindow | None = None
+        self.tray: QSystemTrayIcon | None = None
+        self.tray_menu: QMenu | None = None
         self.popup = DictionaryPopup()
         self.overlay: TranslationOverlay | None = None
         self.freeze_overlay: FreezeFrameOverlay | None = None
@@ -298,7 +300,12 @@ class Controller(QObject):
     # ------------------------------------------------------------- трей
     def _tray(self):
         # tray и menu держим на self, иначе сборщик мусора их убьёт и меню «умрёт»
-        self.tray = QSystemTrayIcon(make_app_icon(), self)
+        if getattr(self, "tray", None) is None:
+            self.tray = QSystemTrayIcon(make_app_icon(), self)
+            self.tray.activated.connect(self._tray_activated)
+        else:
+            self.tray.setIcon(make_app_icon())
+
         self.tray_menu = QMenu()
         hk = CONFIG.get("hotkey", "alt+q").upper()
         self.tray_menu.addAction(f"{t('Распознать текст')}\t{hk}").triggered.connect(self._tray_recognize)
@@ -311,8 +318,8 @@ class Controller(QObject):
         self.tray_menu.addAction(t("Выход")).triggered.connect(self.app.quit)
         self.tray.setContextMenu(self.tray_menu)
         self.tray.setToolTip(t("WordSnap — экранный переводчик и словарь"))
-        self.tray.activated.connect(self._tray_activated)
-        self.tray.show()
+        if not self.tray.isVisible():
+            self.tray.show()
 
     def _tray_donate(self):
         from app.ui.thank_you_dialog import open_donation_support
@@ -890,6 +897,21 @@ def main():
         except Exception:
             pass
 
+    # Проверка на повторный запуск (Single Instance) через Win32 Mutex
+    _single_mutex = None
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            mutex_name = "Global\\WordSnap_SingleInstance_Mutex"
+            _single_mutex = kernel32.CreateMutexW(None, False, mutex_name)
+            last_err = kernel32.GetLastError()
+            if last_err == 183:  # ERROR_ALREADY_EXISTS
+                print("WordSnap is already running. Exiting duplicate instance.")
+                sys.exit(0)
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("WordSnap")
     from PySide6.QtGui import QFont
@@ -903,6 +925,11 @@ def main():
                                                             QSystemTrayIcon.Warning, 4000))
 
     def _on_about_to_quit():
+        if getattr(ctl, "tray", None) is not None:
+            try:
+                ctl.tray.hide()
+            except Exception:
+                pass
         if ctl.window is not None:
             from app.ui.theme import save_window_size
             save_window_size("main_window", ctl.window, save_maximized=True, save_pos=True)

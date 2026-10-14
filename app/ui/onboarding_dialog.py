@@ -559,7 +559,10 @@ class OnboardingWizard(QDialog):
                 is_ok = True
             except Exception as e:
                 err_msg = str(e)
-            self.ai_check_done.emit(is_ok, err_msg)
+            try:
+                self.ai_check_done.emit(is_ok, err_msg)
+            except RuntimeError:
+                pass
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -721,7 +724,10 @@ class OnboardingWizard(QDialog):
                 ok, msg = client.check_connection(timeout=2.0)
             except Exception as e:
                 ok, msg = False, str(e)
-            self.anki_check_done.emit(ok, msg)
+            try:
+                self.anki_check_done.emit(ok, msg)
+            except RuntimeError:
+                pass
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -761,6 +767,7 @@ class OnboardingWizard(QDialog):
             ("⚙️", t("Полная кастомизация:"), t("все настройки (хоткеи, колоды Anki, источники, оверлей) доступны в окне Настроек.")),
         ]
 
+        self.s5_tip_widgets = []
         for icon, title, desc in tips:
             row = QFrame()
             row.setObjectName("InnerPanel")
@@ -781,6 +788,7 @@ class OnboardingWizard(QDialog):
             rlay.addWidget(licon)
             rlay.addLayout(rtxt, 1)
             lay.addWidget(row)
+            self.s5_tip_widgets.append((rtitle, rdesc))
 
         lay.addStretch(1)
         self.stack.addWidget(page)
@@ -818,7 +826,7 @@ class OnboardingWizard(QDialog):
 
         self.btn_back.setVisible(idx > 0)
         if idx == count - 1:
-            self.btn_next.setText(t("Начать работу 🚀"))
+            self.btn_next.setText(t("Начать работу"))
             self.btn_skip.setVisible(False)
         else:
             self.btn_next.setText(t("Далее"))
@@ -873,6 +881,15 @@ class OnboardingWizard(QDialog):
         self.btn_install_dict.setText("📁 " + t("Установить словарь (.zip)"))
         self.s5_title.setText("🎉 " + t("Всё готово к работе!"))
         self.s5_desc.setText(t("Основные настройки завершены. Вот несколько быстрых советов:"))
+        hk = CONFIG.get("hotkey", "alt+q").upper()
+        tips_data = [
+            (f"<b>{hk}</b> " + t("или средняя кнопка мыши (СКМ):"), t("наведите курсор на слово или текст на экране и нажмите горячую клавишу.")),
+            (t("Иконка в трее:"), t("WordSnap работает в фоновом режиме и всегда доступен около часов.")),
+            (t("Полная кастомизация:"), t("все настройки (хоткеи, колоды Anki, источники, оверлей) доступны в окне Настроек.")),
+        ]
+        for (rtitle, rdesc), (title, desc) in zip(getattr(self, "s5_tip_widgets", []), tips_data):
+            rtitle.setText(title)
+            rdesc.setText(desc)
         self.btn_skip.setText(t("Пропустить шаг"))
         self.btn_back.setText(t("Назад"))
         self._update_nav_buttons()

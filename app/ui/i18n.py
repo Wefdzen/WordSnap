@@ -419,7 +419,7 @@ _EN = {
     "Пропустить настройку": "Skip setup",
     "Назад": "Back",
     "Далее": "Next",
-    "Начать работу ": "Get started ",
+    "Начать работу": "Get started",
     "Запустить мастер первоначальной настройки": "Run initial setup wizard",
     "Пройти пошаговую настройку языка, темы, режима и ИИ заново.":
         "Run step-by-step setup for language, theme, mode and AI again.",
@@ -533,5 +533,10 @@ def t(s: str) -> str:
             prefix = s[:len(s) - len(s.lstrip())]
             suffix = s[len(s.rstrip()):]
             return prefix + _EN[stripped] + suffix
+        for k, v in _EN.items():
+            if k.strip() == stripped:
+                prefix = s[:len(s) - len(s.lstrip())]
+                suffix = s[len(s.rstrip()):]
+                return prefix + v.strip() + suffix
         return _EN.get(s, s)
     return s
