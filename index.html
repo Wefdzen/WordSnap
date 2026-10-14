@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WordSnap — Instant On-Screen OCR Translator & Offline Yomitan for Windows</title>
+
+  <meta name="description"
+    content="Instant on-screen OCR translator, offline Yomitan dictionary & Anki study cards for Windows 10/11. Hover and look up words anywhere in 3D games, visual novels, manga, videos, and desktop apps.">
+  <meta name="keywords"
+    content="WordSnap, OCR translator, game translator, Yomitan, Anki, AnkiConnect, screen freeze, visual novel dictionary, language immersion, Windows OCR">
+  <meta name="author" content="Wefdzen">
+
+  <!-- OpenGraph -->
+  <meta property="og:title" content="WordSnap — Instant On-Screen OCR Translator for Windows">
+  <meta property="og:description"
+    content="Look up words anywhere in 3D games, visual novels, manga, and desktop apps. Freeze screen mode, offline Yomitan dictionaries, and 1-click Anki cards.">
+  <meta property="og:image" content="assets/app.jpg">
+  <meta property="og:type" content="website">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon" href="assets/icon.ico">
+  <link rel="apple-touch-icon" href="assets/icon.png">
+
+  <!-- Early Theme & Language Init Script to avoid FOUC -->
+  <script>
+    (function () {
+      var savedTheme = localStorage.getItem('wordsnap-theme');
+      if (!savedTheme) {
+        savedTheme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', savedTheme);
+
+      var savedLang = localStorage.getItem('wordsnap-lang');
+      if (savedLang !== 'ru' && savedLang !== 'en') {
+        savedLang = 'en'; // default to English
+      }
+      document.documentElement.setAttribute('lang', savedLang);
+      document.documentElement.setAttribute('data-lang', savedLang);
+    })();
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="navbar">
+    <div class="container nav-container">
+
+      <!-- Brand Logo on Left -->
+      <a href="#" class="brand-link" aria-label="WordSnap Home">
+        <img src="assets/icon.png" alt="WordSnap Icon" class="brand-icon" style="width: 50px; height: auto;">
+        <span>WordSnap</span>
+      </a>
+
+      <!-- Navigation Links on Right -->
+      <nav class="main-nav">
+        <ul class="nav-menu">
+          <li><a href="#features" class="nav-link" data-i18n="navFeatures">Features</a></li>
+          <li><a href="#freeze-mode" class="nav-link" data-i18n="navFreeze">Freeze Mode</a></li>
+          <li><a href="#anki-integration" class="nav-link" data-i18n="navAnki">Anki Sync</a></li>
+          <li><a href="#shortcuts" class="nav-link" data-i18n="navShortcuts">Shortcuts</a></li>
+          <li><a href="#download" class="nav-link" data-i18n="navDownloads">Downloads</a></li>
+          <li><a href="#faq" class="nav-link" data-i18n="navFaq">FAQ</a></li>
+        </ul>
+      </nav>
+
+      <!-- Nav Actions (Matching Lucide reference exactly) -->
+      <div class="nav-actions">
+        <!-- Language Switcher Dropdown (Default ENG, expandable for future languages) -->
+        <div class="lang-dropdown" id="langDropdown">
+          <button type="button" class="lang-dropdown-trigger" id="langDropdownTrigger" aria-expanded="false"
+            aria-haspopup="true" title="Select language">
+            <svg class="lang-globe-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+            <span class="lang-current-label" id="currentLangLabel">ENG</span>
+            <svg class="lang-chevron-icon" width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <div class="lang-dropdown-menu" id="langDropdownMenu" role="menu">
+            <button type="button" class="lang-menu-item active" data-lang="en" role="menuitem">
+              <span class="lang-item-code">ENG</span>
+              <span class="lang-item-name">English</span>
+              <svg class="lang-check-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </button>
+            <button type="button" class="lang-menu-item" data-lang="ru" role="menuitem">
+              <span class="lang-item-code">RU</span>
+              <span class="lang-item-name">Русский</span>
+              <svg class="lang-check-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="nav-divider"></div>
+
+        <!-- Pill Theme Switch Toggle (Sliding Knob with Moon/Sun) -->
+        <button class="theme-toggle-switch" id="themeToggleSwitch" role="switch" aria-checked="false"
+          title="Switch theme (Dark / Warm Stone Light)">
+          <div class="theme-toggle-thumb" id="themeToggleThumb">
+            <svg class="thumb-icon-moon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="thumb-icon-sun" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </div>
+        </button>
+
+        <div class="nav-divider"></div>
+
+        <!-- Clean GitHub Icon Link (No Stars, No Button) -->
+        <a href="https://github.com/Wefdzen/WordSnap" target="_blank" rel="noopener noreferrer" class="nav-icon-btn"
+          title="GitHub Repository">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+          </svg>
+        </a>
+
+        <!-- Support Developer Heart Icon Link -->
+        <a href="https://www.donationalerts.com/r/wefdzen" target="_blank" rel="noopener noreferrer"
+          class="nav-icon-btn" title="Support Developer ❤️">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+          </svg>
+        </a>
+
+        <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle navigation menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main>
+    <section class="hero-section">
+      <div class="container">
+
+        <div class="hero-grid">
+
+          <!-- Left Column -->
+          <div class="hero-left">
+            <div class="hero-version-pill">
+              <span class="version-highlight">v1.2.0</span>
+              <span>•</span>
+              <span data-i18n="heroVersion">For Windows 10 & 11</span>
+            </div>
+
+            <h1 class="hero-title" data-i18n-html="heroTitle">
+              Instant on-screen OCR<br>
+              <span class="title-accent">& offline dictionaries.</span>
+            </h1>
+
+            <p class="hero-desc" data-i18n="heroDesc">
+              Look up words anywhere in 3D games, visual novels, manga, videos, and desktop apps.
+              Freeze screen mode, offline Yomitan engine, and 1-click Anki study flashcards.
+            </p>
+
+            <div class="hero-actions">
+              <a href="#download" class="btn-hero-primary" data-i18n="heroBtnExe">
+                Download for Windows (.exe)
+              </a>
+              <a href="https://github.com/Wefdzen/WordSnap/releases" target="_blank" rel="noopener noreferrer"
+                class="btn-hero-secondary" data-i18n="heroBtnZip">
+                Portable (.zip)
+              </a>
+              <a href="https://github.com/Wefdzen/WordSnap" target="_blank" rel="noopener noreferrer"
+                class="btn-hero-secondary" data-i18n="heroBtnGh">
+                GitHub
+              </a>
+            </div>
+
+            <!-- Quick word tester chips -->
+            <div class="quick-word-picker">
+              <span data-i18n="heroPickerLabel">Try lookup:</span>
+              <button class="word-chip active" data-word="know">know</button>
+              <button class="word-chip" data-word="Anki">Anki</button>
+              <button class="word-chip" data-word="Artifact">Artifact</button>
+              <button class="word-chip" data-word="Immersion">Immersion</button>
+              <button class="word-chip" data-word="冒険">冒険 (Quest)</button>
+            </div>
+          </div>
+
+          <!-- Right Column: AUTHENTIC 1:1 WordSnap Popup Card (Exact Match) -->
+          <div class="hero-right">
+            <div class="real-popup-card" id="realPopupCard">
+
+              <!-- Top-right Controls: Green Anki Plus ＋ & Red Bookmark Ribbon 🔖 -->
+              <div class="popup-topbar-controls">
+                <button class="popup-anki-plus-btn" id="popupAnkiPlusBtn"
+                  data-i18n-title="popupBtnAnkiTitle"
+                  title="Add word to Anki (AnkiConnect)">＋</button>
+                <button class="popup-bookmark-ribbon" id="popupBookmarkBtn"
+                  data-i18n-title="popupBtnFavTitle"
+                  title="Save word to vocabulary library">🔖</button>
+              </div>
+
+              <!-- Section 1: Translator (Sentence with Olive Highlight, not loading!) -->
+              <div class="popup-source-section">
+                <div class="source-head-row">
+                  <span class="source-label" data-i18n-html="popupLblTranslator">Translator <span class="source-sparkle">✦</span></span>
+                  <span class="source-info-icon" title="Sentence context translator">ⓘ</span>
+                  <div class="source-hairline"></div>
+                </div>
+                <div class="translator-dim-parenthesis" id="translatorDimSentence">(Если тебе понадобится помощь, просто
+                  дай мне знать.)</div>
+                <div class="translator-result-line" id="translatorResultLine">
+                  Если тебе нужна помощь, просто дай мне <span class="context-hilite"
+                    id="translatorHiliteWord">знать</span>.
+                </div>
+              </div>
+
+              <!-- Section 2: AI Dictionary -->
+              <div class="popup-source-section">
+                <div class="source-head-row">
+                  <span class="source-label" data-i18n-html="popupLblDict">AI Dictionary <span class="source-sparkle">✦</span></span>
+                  <span class="source-info-icon" title="Looktionary AI & Yomitan definition">ⓘ</span>
+                  <div class="source-hairline"></div>
+                </div>
+
+                <!-- Headword + Audio Buttons -->
+                <div class="popup-headword-row">
+                  <span class="popup-term-text" id="popupWordText">know</span>
+                  <button class="btn-popup-tts" id="btnPopupAudio1" data-i18n-title="popupAudioNormalTitle" title="Pronounce word (Normal speed)">🔊</button>
+                  <button class="btn-popup-tts" id="btnPopupAudio2" data-i18n-title="popupAudioSlowTitle" title="Pronounce word (Slow speed)">🔉</button>
+                </div>
+
+                <!-- CEFR Badge & Transcription -->
+                <div class="popup-sub-row">
+                  <span class="badge-cefr-pill" id="popupCefrBadge">A1</span>
+                  <span class="popup-transcription" id="popupTranscription">/nəʊ/</span>
+                </div>
+
+                <!-- POS Tag Pill Box -->
+                <div class="popup-pos-box" id="popupPosText">
+                  Глагол, непереходный, инфинитив
+                </div>
+
+                <!-- Main Definition Text -->
+                <div class="popup-definition-text" id="popupDefinitionText">
+                  Сообщать кому-либо информацию или уведомлять о чём-либо. В данном контексте используется в устойчивом
+                  выражении 'let me know', означающем 'сообщите мне' или 'дайте мне знать'.
+                </div>
+
+                <!-- Target Word Translation with Flag -->
+                <div class="popup-trans-row" id="popupTargetTransRow">
+                  <span class="flag-emoji">🇷🇺</span>
+                  <span id="popupTargetTransText">знать, сообщать, давать знать</span>
+                </div>
+
+                <!-- Synonyms -->
+                <div class="popup-synonyms-text" id="popupSynonymsText">
+                  Synonyms: inform, notify, tell
+                </div>
+
+                <!-- Collapsible Context Used Box -->
+                <div class="popup-context-collapsible" id="popupContextBox">
+                  <button class="context-header-btn" id="btnToggleContext">
+                    <span data-i18n="popupContextBtn">Context used</span>
+                    <span class="context-chevron">⌄</span>
+                  </button>
+                  <div class="context-inner-content" id="contextInnerContent">
+                    "If you need any help, just let me <span class="context-hilite">know</span>."
+                  </div>
+                </div>
+
+                <!-- Bottom Popup Bar -->
+                <div class="popup-bottom-bar">
+                  <span class="status-ocr-active" data-i18n="popupOcrActive">Windows Media OCR • 100% confidence</span>
+                  <span class="popup-footer-anki-hint" data-i18n-html="popupAnkiHint">
+                    <span>＋</span> AnkiConnect ready
+                  </span>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Ticker / Features Ribbon -->
+    <section class="ticker-section" aria-label="Key Technologies">
+      <div class="ticker-track">
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="m10 15 5-3-5-3v6z" />
+          </svg>
+          <span data-i18n="tickerOcr">Direct Windows OCR</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20M2 12h20" />
+          </svg>
+          <span data-i18n="tickerFreeze">Freeze Screen Gaming Mode</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
+          </svg>
+          <span data-i18n="tickerYomitan">100% Offline Yomitan (.zip)</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <span data-i18n="tickerAi">Dual AI (Groq & Gemini)</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          <span data-i18n="tickerAnki">1-Click AnkiConnect Sync</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span data-i18n="tickerCrop">Scene Screenshot Crops</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <!-- Loop copy -->
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="m10 15 5-3-5-3v6z" />
+          </svg>
+          <span data-i18n="tickerOcr">Direct Windows OCR</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20M2 12h20" />
+          </svg>
+          <span data-i18n="tickerFreeze">Freeze Screen Gaming Mode</span>
+        </div>
+        <span class="ticker-sep">•</span>
+        <div class="ticker-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z" />
+          </svg>
+          <span data-i18n="tickerYomitan">100% Offline Yomitan (.zip)</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bento Grid Features (Lucide Clean 6-Cards) -->
+    <section class="features-section" id="features">
+      <div class="container">
+
+        <div class="section-header">
+          <span class="section-label" data-i18n="featBadge">Core Architecture</span>
+          <h2 class="section-title" data-i18n="featTitle">Engineered for seamless gaming & study.</h2>
+          <p class="section-desc" data-i18n="featDesc">
+            No more pausing your flow, Alt-Tabbing to web browsers, or copying Kanji manually.
+          </p>
+        </div>
+
+        <div class="bento-grid">
+
+          <article class="bento-card">
+            <div class="card-icon-container">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </div>
+            <h3 class="card-title" data-i18n="featC1Title">Native Windows OCR</h3>
+            <p class="card-desc" data-i18n="featC1Desc">
+              Direct WinRT Media OCR engine delivers sub-frame recognition with zero cloud dependency and low CPU
+              footprint.
+            </p>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-icon-container">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            </div>
+            <h3 class="card-title" data-i18n="featC2Title">Freeze Screen Mode</h3>
+            <p class="card-desc" data-i18n="featC2Desc">
+              Freezes fast 3D camera frames, unlocks mouse cursor, and auto-pauses background game processes so you
+              never miss dialogue.
+            </p>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-icon-container">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"></path>
+                <path d="M6 6h10"></path>
+                <path d="M6 10h10"></path>
+              </svg>
+            </div>
+            <h3 class="card-title" data-i18n="featC3Title">Offline Yomitan (.zip)</h3>
+            <p class="card-desc" data-i18n="featC3Desc">
+              Import any Yomitan dictionary archive. Complete offline morphological de-inflection, pitch accents, and
+              frequency tags.
+            </p>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-icon-container">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+            </div>
+            <h3 class="card-title" data-i18n="featC4Title">Dual AI Lore Translation</h3>
+            <p class="card-desc" data-i18n="featC4Desc">
+              Integrate Groq (Llama 3) and Gemini 2.5 Flash for contextual lore explanations, CEFR levels, and nuanced
+              sentence translations.
+            </p>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-icon-container">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <h3 class="card-title" data-i18n="featC5Title">1-Click Anki Sync</h3>
+            <p class="card-desc" data-i18n="featC5Desc">
+              Direct connection via AnkiConnect: automatically captures scene screenshot crop, context line, audio TTS,
+              and checks duplicates.
+            </p>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-icon-container">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+              </svg>
+            </div>
+            <h3 class="card-title" data-i18n="featC6Title">Words Library & Export</h3>
+            <p class="card-desc" data-i18n="featC6Desc">
+              Review saved words with original scene screenshots, TTS voice replay, and export to CSV, JSON, or Anki TSV
+              format.
+            </p>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Freeze Mode Deep Dive -->
+    <section class="freeze-section" id="freeze-mode">
+      <div class="container">
+        <div class="two-col-layout">
+
+          <div class="freeze-info-col">
+            <span class="section-label" data-i18n="freezeBadge">Gaming Breakthrough</span>
+            <h3 data-i18n="freezeTitle">No more dying while reading dialogue.</h3>
+            <p data-i18n="freezeP1">
+              In fast-paced 3D games (Elden Ring, Genshin Impact, Cyberpunk), mouse movement is locked to the camera and
+              subtitles disappear in 2 seconds.
+            </p>
+            <p data-i18n-html="freezeP2">
+              WordSnap solves this with <strong>Freeze Screen Mode</strong>:
+            </p>
+
+            <ul class="feature-checklist">
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="freezeLi1"><strong>Instant Frame Freeze:</strong> Captures the exact frame at native resolution without
+                  lag.</span>
+              </li>
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="freezeLi2"><strong>Cursor Unlock:</strong> Unbinds the mouse from 3D camera controls so you can hover
+                  freely.</span>
+              </li>
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="freezeLi3"><strong>Process Auto-Pause:</strong> Optionally halts the game process so enemies and cutscene
+                  timers freeze.</span>
+              </li>
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="freezeLi4"><strong>Instant Resume:</strong> Press Esc to unfreeze seamlessly and jump back into the
+                  action.</span>
+              </li>
+            </ul>
+
+            <a href="#download" class="btn-hero-primary" data-i18n="freezeBtn">
+              Download WordSnap
+            </a>
+          </div>
+
+          <div class="interactive-freeze-preview">
+            <img src="assets/freeze_mode.jpg" alt="WordSnap Freeze Mode in action" loading="lazy">
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Anki Flashcard Sync Showcase -->
+    <section class="integration-section" id="anki-integration">
+      <div class="container">
+
+        <div class="section-header">
+          <span class="section-label" data-i18n="ankiBadge">Study Workflow</span>
+          <h2 class="section-title" data-i18n="ankiTitle">Turn every game scene into an Anki flashcard.</h2>
+          <p class="section-desc" data-i18n="ankiDesc">
+            Direct integration via AnkiConnect. Never copy-paste text or take manual screenshots again.
+          </p>
+        </div>
+
+        <div class="two-col-layout">
+
+          <div class="anki-card-showcase">
+            <div class="anki-banner">
+              <div class="anki-logo-text">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon
+                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+                  </polygon>
+                </svg>
+                <span data-i18n="ankiPreviewTitle">Anki Card Preview</span>
+              </div>
+              <span class="anki-deck-chip" data-i18n="ankiDeckChip">Deck: Gaming Vocab</span>
+            </div>
+
+            <div class="anki-preview-content">
+              <div class="anki-front">
+                <div class="anki-headword">know</div>
+                <div class="anki-sentence">"If you need any help, just let me know."</div>
+              </div>
+
+              <div class="anki-screenshot-crop">
+                <img src="assets/screenshot.png" alt="Scene crop screenshot for Anki" loading="lazy">
+                <span class="crop-tag" data-i18n="ankiCropTag">Auto Cropped Scene</span>
+              </div>
+
+              <div class="anki-front" style="font-size: 0.88rem; color: var(--text-secondary);">
+                <span data-i18n-html="ankiMeaning"><strong>Meaning:</strong> inform, notify, let know.</span><br>
+                <span style="color: var(--accent-blue); font-size: 0.8rem; margin-top: 4px; display: inline-block;" data-i18n="ankiAudioAttached">
+                  [Audio: TTS Pronunciation Attached]
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="freeze-info-col">
+            <h3 data-i18n="ankiColTitle">Automate your immersion deck.</h3>
+            <p data-i18n="ankiColDesc">
+              With traditional tools, making a gaming flashcard takes 2 minutes per word. With WordSnap, it takes 0.5
+              seconds:
+            </p>
+
+            <ul class="feature-checklist">
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="ankiLi1"><strong>Context Sentence Extraction:</strong> WordSnap captures the full line around the
+                  word.</span>
+              </li>
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="ankiLi2"><strong>Automatic Screen Crop:</strong> Preserves the visual context in your Anki deck.</span>
+              </li>
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="ankiLi3"><strong>TTS Audio Generation:</strong> Attaches audio pronunciation directly to the card.</span>
+              </li>
+              <li>
+                <span class="check-icon">✓</span>
+                <span data-i18n-html="ankiLi4"><strong>Duplicate Protection:</strong> Prevents clutter by detecting previously saved
+                  words.</span>
+              </li>
+            </ul>
+
+            <a href="https://github.com/Wefdzen/WordSnap#readme" target="_blank" rel="noopener noreferrer"
+              class="btn-hero-secondary" data-i18n="ankiDocBtn">
+              View Documentation →
+            </a>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Keyboard Shortcuts Matrix -->
+    <section class="shortcuts-section" id="shortcuts">
+      <div class="container">
+
+        <div class="section-header">
+          <span class="section-label" data-i18n="scBadge">Keyboard Reference</span>
+          <h2 class="section-title" data-i18n="scTitle">Intuitive shortcuts for high-speed lookup.</h2>
+          <p class="section-desc" data-i18n="scDesc">
+            Designed to never interrupt your gameplay. Fully customizable in Settings.
+          </p>
+        </div>
+
+        <div style="max-width: 780px; margin: 0 auto;">
+          <table class="shortcuts-table" aria-label="Default keyboard shortcuts">
+            <thead>
+              <tr>
+                <th scope="col" data-i18n="scThShortcut">Shortcut</th>
+                <th scope="col" data-i18n="scThScope">Scope</th>
+                <th scope="col" data-i18n="scThAction">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="shortcut-badge">Alt + Q</span></td>
+                <td data-i18n="scR1Scope">Global (Any App / Game)</td>
+                <td data-i18n="scR1Action">Recognize text under cursor & open lookup popup</td>
+              </tr>
+              <tr>
+                <td><span class="shortcut-badge">Esc</span></td>
+                <td data-i18n="scR2Scope">Overlay / Popup</td>
+                <td data-i18n="scR2Action">Dismiss translation & unfreeze screen immediately</td>
+              </tr>
+              <tr>
+                <td><span class="shortcut-badge">Space</span></td>
+                <td data-i18n="scR3Scope">Words Tab</td>
+                <td data-i18n="scR3Action">Speak selected word (Audio TTS pronunciation)</td>
+              </tr>
+              <tr>
+                <td><span class="shortcut-badge">Ctrl + F</span></td>
+                <td data-i18n="scR4Scope">Words Tab</td>
+                <td data-i18n="scR4Action">Focus search bar to filter saved vocabulary</td>
+              </tr>
+              <tr>
+                <td><span class="shortcut-badge">Ctrl + D</span></td>
+                <td data-i18n="scR5Scope">Words Tab</td>
+                <td data-i18n="scR5Action">Toggle favorite (★) status for word</td>
+              </tr>
+              <tr>
+                <td><span class="shortcut-badge">Delete</span></td>
+                <td data-i18n="scR6Scope">Words Tab</td>
+                <td data-i18n="scR6Action">Delete selected word from history</td>
+              </tr>
+              <tr>
+                <td><span class="shortcut-badge">↑ / ↓</span></td>
+                <td data-i18n="scR7Scope">Words Tab</td>
+                <td data-i18n="scR7Action">Navigate between previous and next words</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Downloads Hub -->
+    <section class="downloads-section" id="download">
+      <div class="container">
+
+        <div class="section-header">
+          <span class="section-label" data-i18n="dlBadge">Downloads</span>
+          <h2 class="section-title" data-i18n="dlTitle">Get WordSnap for Windows 10 & 11.</h2>
+          <p class="section-desc" data-i18n="dlDesc">
+            Free for personal use. Choose between standard installer or portable archive.
+          </p>
+        </div>
+
+        <div class="download-cards-grid">
+
+          <!-- Installer Card -->
+          <div class="dl-card recommended">
+            <span class="dl-badge-top" data-i18n="dlRecommended">Recommended</span>
+            <div class="dl-icon-large">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </div>
+            <h3 class="dl-title" data-i18n="dlC1Title">Standard Installer</h3>
+            <p class="dl-meta" data-i18n-html="dlC1Meta">
+              Windows Setup executable (.exe)<br>
+              Automatic Start Menu & Desktop shortcuts, clean uninstaller.
+            </p>
+            <a href="https://github.com/Wefdzen/WordSnap/releases" target="_blank" rel="noopener noreferrer"
+              class="dl-btn primary" data-i18n="dlC1Btn">
+              Download Setup (.exe)
+            </a>
+          </div>
+
+          <!-- Portable Card -->
+          <div class="dl-card">
+            <div class="dl-icon-large">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                <path d="M10 4v4"></path>
+                <path d="M2 8h20"></path>
+              </svg>
+            </div>
+            <h3 class="dl-title" data-i18n="dlC2Title">Portable Edition</h3>
+            <p class="dl-meta" data-i18n-html="dlC2Meta">
+              Zero-install standalone archive (.zip)<br>
+              Extract and run anywhere, including USB thumb drives.
+            </p>
+            <a href="https://github.com/Wefdzen/WordSnap/releases" target="_blank" rel="noopener noreferrer"
+              class="dl-btn secondary" data-i18n="dlC2Btn">
+              Download Portable (.zip)
+            </a>
+          </div>
+
+        </div>
+
+        <!-- Run from source strip -->
+        <div class="source-box">
+          <div class="source-info">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" stroke-width="2">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+            <div class="source-text">
+              <strong data-i18n="dlSrcStrong">Prefer running from Python source?</strong>
+              <span data-i18n="dlSrcSpan">Requires Python 3.11+ on Windows 10/11</span>
+            </div>
+          </div>
+
+          <div class="source-code-block">
+            <code>git clone https://github.com/Wefdzen/WordSnap.git</code>
+            <button class="copy-btn" id="copyGitBtn" data-i18n-title="dlSrcCopyTitle" title="Copy git clone command">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section class="faq-section" id="faq">
+      <div class="container">
+
+        <div class="section-header">
+          <span class="section-label" data-i18n="faqBadge">Questions & Answers</span>
+          <h2 class="section-title" data-i18n="faqTitle">Frequently Asked Questions</h2>
+          <p class="section-desc" data-i18n="faqDesc">
+            Everything you need to know about setting up and using WordSnap.
+          </p>
+        </div>
+
+        <div class="faq-list">
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span data-i18n="faqQ1">Does WordSnap work inside fullscreen 3D games?</span>
+              <svg class="faq-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="faq-answer" data-i18n-html="faqA1">
+              Yes! For borderless windowed and windowed fullscreen games, WordSnap works natively. In games that capture
+              the mouse cursor, WordSnap's <strong>Freeze Screen Mode</strong> temporarily pauses the frame, releases
+              the hardware cursor, and lets you hover and look up any word effortlessly without breaking your game
+              session.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span data-i18n="faqQ2">Do I need an internet connection for dictionary lookups?</span>
+              <svg class="faq-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="faq-answer" data-i18n-html="faqA2">
+              No! WordSnap's core Yomitan dictionary engine is 100% offline. Morphological de-inflection, definitions,
+              frequency numbers, and pitch accents operate locally on your machine. An internet connection is only
+              needed if you choose to enable the optional Groq or Google Gemini AI lore translation modules.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span data-i18n="faqQ3">How does the Anki integration work?</span>
+              <svg class="faq-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="faq-answer" data-i18n-html="faqA3">
+              WordSnap connects to your local desktop Anki via the popular AnkiConnect plugin (code: 2055492159). With a
+              single click (or hotkey), WordSnap crops the in-game scene, extracts the dialogue sentence, generates
+              audio pronunciation, and creates a ready-to-study flashcard in your chosen Anki deck.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span data-i18n="faqQ4">Is WordSnap free and safe to use?</span>
+              <svg class="faq-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="faq-answer" data-i18n-html="faqA4">
+              Yes! WordSnap is released under the PolyForm Noncommercial License 1.0.0 and is completely free for
+              personal use. It has no advertisements, no tracking analytics, and does not transmit your screen content
+              to remote servers. All OCR is executed on your local Windows system.
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button class="faq-question">
+              <span data-i18n="faqQ5">What languages and dictionaries are supported?</span>
+              <svg class="faq-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="faq-answer" data-i18n-html="faqA5">
+              WordSnap supports any standard Yomitan (.zip) dictionary. It comes with built-in presets for Japanese
+              (JMDict, KireiCake, Daijirin, JMnedict), English, and English-Russian dictionaries. You can also import
+              any custom community Yomitan dictionary with a single click.
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Clean Footer (Only 1 discreet Support Developer link) -->
+  <footer class="site-footer">
+    <div class="container">
+
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a href="#" class="brand-link">
+            <img src="assets/icon.png" alt="WordSnap Logo" class="brand-icon" style="width: 50px; height: auto;">
+            <span>WordSnap</span>
+          </a>
+          <p data-i18n="footerDesc">
+            The instant on-screen OCR translator & offline Yomitan dictionary engineered for gaming and immersion
+            learning on Windows.
+          </p>
+        </div>
+
+        <div class="footer-col">
+          <h4 data-i18n="footerHNav">Navigation</h4>
+          <ul class="footer-links">
+            <li><a href="#features" data-i18n="footerLnkFeatures">Features</a></li>
+            <li><a href="#freeze-mode" data-i18n="footerLnkFreeze">Freeze Screen</a></li>
+            <li><a href="#anki-integration" data-i18n="footerLnkAnki">Anki Sync</a></li>
+            <li><a href="#shortcuts" data-i18n="footerLnkShortcuts">Shortcuts</a></li>
+            <li><a href="#download" data-i18n="footerLnkDownloads">Downloads</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h4 data-i18n="footerHComm">Community</h4>
+          <ul class="footer-links">
+            <li><a href="https://github.com/Wefdzen/WordSnap" target="_blank" rel="noopener noreferrer" data-i18n="footerLnkGh">GitHub
+                Repository</a></li>
+            <li><a href="https://github.com/Wefdzen/WordSnap/releases" target="_blank"
+                rel="noopener noreferrer" data-i18n="footerLnkReleases">Releases & Changelog</a></li>
+            <li><a href="https://github.com/Wefdzen/WordSnap/issues" target="_blank" rel="noopener noreferrer" data-i18n="footerLnkIssues">Report an
+                Issue</a></li>
+            <li><a href="https://github.com/Wefdzen/WordSnap/blob/main/LICENSE" target="_blank"
+                rel="noopener noreferrer" data-i18n="footerLnkLicense">PolyForm License</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div data-i18n-html="footerCopy">
+          © 2026 WordSnap. Created by <a href="https://github.com/Wefdzen" target="_blank" rel="noopener noreferrer"
+            style="color: var(--text-primary); text-decoration: none;">Wefdzen</a>. Free for personal use.
+        </div>
+
+        <div class="footer-bottom-links">
+          <span>Windows 10 & 11 • 64-bit</span>
+          <span>•</span>
+          <a href="https://www.donationalerts.com/r/wefdzen" target="_blank" rel="noopener noreferrer"
+            class="support-heart-link" data-i18n="footerSupport">
+            Support Developer ❤️
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div class="toast-notice" id="toastNotice">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60cdff" stroke-width="2.5">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+    </svg>
+    <span id="toastMessage">Card added to Anki successfully!</span>
+  </div>
+
+  <!-- Scripts -->
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
