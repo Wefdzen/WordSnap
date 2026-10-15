@@ -3,10 +3,125 @@
 Запуск:  python main.py
 Горячая клавиша по умолчанию: Alt+Q (или средняя кнопка мыши).
 """
+import os
 import sys
 import threading
 import traceback
 import atexit
+import datetime
+import faulthandler
+
+CRASH_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crash.log")
+try:
+    _crash_file = open(CRASH_LOG_PATH, "a", encoding="utf-8")
+    faulthandler.enable(file=_crash_file)
+except Exception:
+    _crash_file = None
+
+_GLOBAL_PAUSED_HANDLE = None
+
+def _emergency_resume_process():
+    """Гарантированное возобновление процесса при аварийном завершении приложения (atexit)."""
+    global _GLOBAL_PAUSED_HANDLE
+    h = _GLOBAL_PAUSED_HANDLE
+    if h and h != -1 and h != 0xFFFFFFFFFFFFFFFF and sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.ntdll.NtResumeProcess(h)
+            ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            pass
+        _GLOBAL_PAUSED_HANDLE = None
+
+def _log_crash_exception(exc_type, exc_value, exc_tb, thread_name=None):
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    th_info = f" in thread '{thread_name}'" if thread_name else " in main thread"
+    msg = f"\n[{now_str}] UNCAUGHT EXCEPTION{th_info}:\n{tb_str}\n"
+    sys.stderr.write(msg)
+    try:
+        with open(CRASH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(msg)
+            f.flush()
+    except Exception:
+        pass
+    _emergency_resume_process()
+
+def _sys_excepthook(exc_type, exc_value, exc_tb):
+    _log_crash_exception(exc_type, exc_value, exc_tb)
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+sys.excepthook = _sys_excepthook
+
+if hasattr(threading, "excepthook"):
+    def _threading_excepthook(args):
+        _log_crash_exception(args.exc_type, args.exc_value, args.exc_traceback,
+                             thread_name=args.thread.name if args.thread else None)
+    threading.excepthook = _threading_excepthook
+
+def _on_app_exit():
+    _emergency_resume_process()
+    try:
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(CRASH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{now_str}] App exited normally.\n")
+            f.flush()
+    except Exception:
+        pass
+
+atexit.register(_on_app_exit)
+
+if sys.platform == "win32":
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32
+        u32 = ctypes.windll.user32
+        ntdll = ctypes.windll.ntdll
+
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.OpenProcess.restype = wintypes.HANDLE
+
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+
+        k32.GetCurrentThreadId.argtypes = []
+        k32.GetCurrentThreadId.restype = wintypes.DWORD
+
+        ntdll.NtSuspendProcess.argtypes = [wintypes.HANDLE]
+        ntdll.NtSuspendProcess.restype = wintypes.LONG
+
+        ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+        ntdll.NtResumeProcess.restype = wintypes.LONG
+
+        u32.GetForegroundWindow.argtypes = []
+        u32.GetForegroundWindow.restype = wintypes.HWND
+
+        u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        u32.GetWindowThreadProcessId.restype = wintypes.DWORD
+
+        u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        u32.AttachThreadInput.restype = wintypes.BOOL
+
+        u32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        u32.SetForegroundWindow.restype = wintypes.BOOL
+
+        u32.SetFocus.argtypes = [wintypes.HWND]
+        u32.SetFocus.restype = wintypes.HWND
+
+        u32.ClipCursor.argtypes = [ctypes.c_void_p]
+        u32.ClipCursor.restype = wintypes.BOOL
+
+        u32.ReleaseCapture.argtypes = []
+        u32.ReleaseCapture.restype = wintypes.BOOL
+
+        u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        u32.PostMessageW.restype = wintypes.BOOL
+
+        u32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_size_t]
+        u32.keybd_event.restype = None
+    except Exception as e:
+        print("WinAPI ctypes signature setup error:", e)
 
 from PySide6.QtCore import QObject, Signal, Qt, QRect, QPoint, QTimer
 from PySide6.QtGui import QPixmap, QImage
@@ -19,27 +134,12 @@ from app.gemini import get_ai, GeminiError
 from app.hotkeys import HotkeyManager, parse_hotkey
 from app.ui.main_window import MainWindow, make_app_icon
 from app.ui.popup import DictionaryPopup
-from app.ui.overlay import TranslationOverlay, WordHighlight, FreezeFrameOverlay, force_foreground_and_release_cursor
+from app.ui.overlay import (TranslationOverlay, WordHighlight, FreezeFrameOverlay,
+                            force_foreground_and_release_cursor, restore_game_focus)
 from app.ui.i18n import t
 
 # Сообщение ИИ-источников, когда не задан API-ключ провайдера.
 NO_KEY_MSG = "Добавьте API-ключ в Настройках → ИИ-источники."
-
-_GLOBAL_PAUSED_HANDLE = None
-
-def _emergency_resume_process():
-    """Гарантированное возобновление процесса при аварийном завершении приложения (atexit)."""
-    global _GLOBAL_PAUSED_HANDLE
-    if _GLOBAL_PAUSED_HANDLE and sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.ntdll.NtResumeProcess(_GLOBAL_PAUSED_HANDLE)
-            ctypes.windll.kernel32.CloseHandle(_GLOBAL_PAUSED_HANDLE)
-        except Exception:
-            pass
-        _GLOBAL_PAUSED_HANDLE = None
-
-atexit.register(_emergency_resume_process)
 
 def active_window_title() -> tuple[str, str, int, int]:
     """(имя процесса, заголовок активного окна, pid, hwnd) — для контекста ИИ, автопаузы и разворачивания."""
@@ -69,11 +169,91 @@ def active_window_title() -> tuple[str, str, int, int]:
     except Exception:
         return "", "", 0, 0
 
+def get_selected_text_safe() -> str:
+    """Безопасно считывает выделенный текст в активном окне через Ctrl+C с сохранением и восстановлением буфера обмена."""
+    if sys.platform != "win32":
+        return ""
+    import ctypes
+    import time
+    u32 = ctypes.windll.user32
+
+    old_seq = u32.GetClipboardSequenceNumber()
+    old_clip_text = None
+    try:
+        from PySide6.QtGui import QGuiApplication
+        cb = QGuiApplication.clipboard()
+        if cb:
+            old_clip_text = cb.text()
+    except Exception:
+        pass
+
+    # Отпускаем Alt (если зажат хоткеем)
+    VK_MENU = 0x12
+    VK_CONTROL = 0x11
+    VK_C = 0x43
+    KEYEVENTF_KEYUP = 0x0002
+
+    u32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.01)
+
+    # Симулируем нажатие Ctrl+C
+    u32.keybd_event(VK_CONTROL, 0, 0, 0)
+    u32.keybd_event(VK_C, 0, 0, 0)
+    u32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
+    u32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+    # Ожидаем обновления буфера до 80 мс
+    t0 = time.time()
+    changed = False
+    while time.time() - t0 < 0.08:
+        if u32.GetClipboardSequenceNumber() != old_seq:
+            changed = True
+            break
+        time.sleep(0.01)
+
+    if not changed:
+        return ""
+
+    selected_text = ""
+    try:
+        from PySide6.QtGui import QGuiApplication
+        cb = QGuiApplication.clipboard()
+        if cb:
+            selected_text = cb.text()
+    except Exception:
+        pass
+
+    # Восстанавливаем предыдущий текст буфера обмена
+    if old_clip_text is not None:
+        try:
+            from PySide6.QtGui import QGuiApplication
+            cb = QGuiApplication.clipboard()
+            if cb:
+                cb.setText(old_clip_text)
+        except Exception:
+            pass
+
+    return (selected_text or "").strip()
+
+def is_short_selection(text: str) -> bool:
+    """Проверяет, подходит ли выделенный текст под одиночный термин (до 4 слов или до 15 CJK-символов)."""
+    if not text:
+        return False
+    t = text.strip()
+    if not t:
+        return False
+    from app.ocr import is_cjk_char
+    cjk_count = sum(1 for c in t if is_cjk_char(c))
+    if cjk_count > 0:
+        return len(t) <= 15
+    words = t.split()
+    return len(words) <= 4 and len(t) <= 60
+
 class Bridge(QObject):
     """Проброс результатов фоновых потоков в GUI-поток."""
     translator_ready = Signal(str)
     looktionary_ready = Signal(dict)
-    offline_dict_ready = Signal(str, object)
+    offline_dict_ready = Signal(str, object, bool)
     source_failed = Signal(str, str)
     overlay_ready = Signal(dict, list, object)
     highlight_ready = Signal(int, int, int, int)
@@ -262,7 +442,7 @@ class Controller(QObject):
             import ctypes
             # PROCESS_SUSPEND_RESUME = 0x0800
             h = ctypes.windll.kernel32.OpenProcess(0x0800, False, pid)
-            if h:
+            if h and h != -1 and h != 0xFFFFFFFFFFFFFFFF:
                 ctypes.windll.ntdll.NtSuspendProcess(h)
                 self._paused_process_handle = h
                 global _GLOBAL_PAUSED_HANDLE
@@ -286,7 +466,7 @@ class Controller(QObject):
         if not force and self.freeze_overlay and self.freeze_overlay.isVisible():
             return
         h = getattr(self, "_paused_process_handle", None)
-        if h:
+        if h and h != -1 and h != 0xFFFFFFFFFFFFFFFF:
             try:
                 import ctypes
                 ctypes.windll.ntdll.NtResumeProcess(h)
@@ -369,6 +549,36 @@ class Controller(QObject):
         pos = QCursor.pos()
         self.on_hotkey(pos.x(), pos.y())
 
+    def _is_game_window(self, app_name: str, win_title: str) -> bool:
+        """Проверяет, является ли активное окно игрой (по freeze_screen, autopause_window или fullscreenize_window)."""
+        if CONFIG.get("freeze_screen"):
+            return True
+        ap_target = (CONFIG.get("autopause_window") or "").strip().lower()
+        fs_target = (CONFIG.get("fullscreenize_window") or "").strip().lower()
+        app_low = (app_name or "").lower()
+        win_low = (win_title or "").lower()
+        if ap_target and (ap_target in app_low or ap_target in win_low):
+            return True
+        if fs_target and (fs_target in app_low or fs_target in win_low):
+            return True
+        return False
+
+    def _hide_active_popups_for_capture(self):
+        """Скрывает открытый попап и подсветку перед захватом скриншота,
+        давая Windows DWM 30 мс на перерисовку, чтобы старый UI не попал в кадр."""
+        hidden = False
+        if self.popup and self.popup.isVisible():
+            self.popup.hide()
+            hidden = True
+        if self.word_highlight and self.word_highlight.isVisible():
+            self.close_highlight()
+            hidden = True
+        if hidden:
+            from PySide6.QtWidgets import QApplication
+            import time
+            QApplication.processEvents()
+            time.sleep(0.03)
+
     # --------------------------------------------------------- горячая клавиша
     def on_hotkey(self, x: int, y: int):
         if self.freeze_overlay and self.freeze_overlay.isVisible():
@@ -381,6 +591,17 @@ class Controller(QObject):
             return
         if self._busy:
             return
+
+        # Скрываем старый попап и подсветку ДО снятия нового скриншота
+        self._hide_active_popups_for_capture()
+
+        # 1. Приоритет выделенного текста в системе: проверяем ТОЛЬКО если это не игра и не включён freeze_screen
+        app_name, win_title, pid, hwnd = active_window_title()
+        if not self._is_game_window(app_name, win_title):
+            selected = get_selected_text_safe()
+            if selected and is_short_selection(selected):
+                self._lookup_selected_text(selected, x, y)
+                return
 
         mode = CONFIG.get("mode", "dictionary")
         # Если режим переводчика, но зажат Shift/Ctrl (или Alt, если он не входит в сам хоткей) — режим словаря
@@ -398,140 +619,26 @@ class Controller(QObject):
         else:
             self._dispatch_dictionary_mode(x, y)
 
-    def _dispatch_dictionary_mode(self, x: int, y: int):
-        if CONFIG.get("freeze_screen"):
-            self.run_freeze_dictionary_mode(x, y)
-        else:
-            self.run_dictionary_mode(x, y)
+    def _lookup_selected_text(self, text: str, x: int, y: int):
+        """Прямой поиск по выделенному в системе тексту (Alt+Q без OCR)."""
+        self._hide_active_popups_for_capture()
+        app_name, win_title, pid, hwnd = active_window_title()
+        self._check_autopause(app_name, win_title, pid)
+        self._check_fullscreenize(app_name, win_title, hwnd)
 
-    def on_escape(self):
-        """Глобальный Esc: закрывает попап/оверлей даже если фокус не на них."""
-        self._popup_open = False
-        if self.freeze_overlay and self.freeze_overlay.isVisible():
-            self._close_freeze_mode()
-            return
-        if self.popup.isVisible():
-            self.popup.close_animated()      # окно сжимается и гаснет (не мгновенно)
-        if self.overlay and self.overlay.isVisible():
-            self.overlay.close()
-            self.overlay = None
-            self._resume_paused_process()
-        self.close_highlight()
+        from app import ocr
+        w_clean = ocr.clean_word(text) or text.strip()
+        sentence = text.strip()
 
-    def _close_freeze_mode(self):
-        """Корректный выход из режима заморозки (Resume & Restore)."""
-        # 1. Сначала возобновляем процесс игры (NtResumeProcess и CloseHandle)
-        self._resume_paused_process(force=True)
-
-        # 2. Закрываем / скрываем оверлей
-        overlay = self.freeze_overlay
-        self.freeze_overlay = None
-        if overlay:
-            try:
-                overlay.close()
-            except Exception:
-                pass
-
-        if self.popup and self.popup.isVisible():
-            self.popup.close_animated()
-
-        # 3. Возвращаем фокус окну игры
-        if getattr(self, "_saved_game_hwnd", None) and sys.platform == "win32":
-            try:
-                import ctypes
-                ctypes.windll.user32.SetForegroundWindow(self._saved_game_hwnd)
-            except Exception:
-                pass
-            self._saved_game_hwnd = None
-
-    # ============================ РЕЖИМ СЛОВАРЯ ============================
-    def run_freeze_dictionary_mode(self, x: int, y: int):
-        """Режим «Заморозка экрана + Свободный курсор» для игр без видимого курсора."""
-        self.close_highlight()
-
-        # Шаг 3.1: До показа оверлея сохраняем game_hwnd и game_pid
-        app_name, win_title, game_pid, game_hwnd = active_window_title()
-        if sys.platform == "win32" and not game_hwnd:
-            try:
-                import ctypes
-                import ctypes.wintypes as wt
-                game_hwnd = int(ctypes.windll.user32.GetForegroundWindow())
-                pid_dw = wt.DWORD()
-                ctypes.windll.user32.GetWindowThreadProcessId(game_hwnd, ctypes.byref(pid_dw))
-                game_pid = int(pid_dw.value)
-            except Exception:
-                pass
-        self._saved_game_hwnd = game_hwnd
-        self._saved_game_pid = game_pid
-
-        self._check_fullscreenize(app_name, win_title, game_hwnd)
-
-        # Шаг 3.2: Делаем скриншот экрана
+        shot_name = ""
+        light_bg = False
         try:
-            img, mon = capture.grab_monitor_at(x, y)
-        except Exception as e:
-            self.bridge.error.emit(str(e))
-            self._resume_paused_process(force=True)
-            return
+            img, left, top = capture.region_around(x, y)
+            shot_name = WORDS.save_screenshot(img)
+            light_bg = img.convert("L").resize((1, 1)).getpixel((0, 0)) > 140
+        except Exception:
+            pass
 
-        self._freeze_full_shot = img
-
-        # Шаг 3.3: Создаём и показываем FreezeFrameOverlay
-        self.freeze_overlay = FreezeFrameOverlay(
-            img, mon,
-            on_word_clicked=lambda w, s, sx, sy, ww, wh: self._on_freeze_word_clicked(w, s, sx, sy, ww, wh, app_name, win_title),
-            on_close=self._on_freeze_closed
-        )
-        self.freeze_overlay.setGeometry(mon["left"], mon["top"], mon["width"], mon["height"])
-        self.freeze_overlay.showFullScreen()
-        self.freeze_overlay.raise_()
-        self.freeze_overlay.activateWindow()
-
-        # Шаг 3.4: Принудительный перехват фокуса и сброс захвата курсора,
-        # пока игра ещё жива и успевает обработать потерю фокуса (WM_KILLFOCUS)
-        force_foreground_and_release_cursor(self.freeze_overlay)
-
-        # Шаг 3.5: Запуск OCR-потока
-        self.freeze_overlay._start_ocr_thread()
-
-        # Шаг 3.6: Если включена автопауза, вызываем заморозку процесса с задержкой 30 мс
-        target = (CONFIG.get("autopause_window") or "").strip().lower()
-        if target and game_pid and (target in (app_name or "").lower() or target in (win_title or "").lower()):
-            def do_pause():
-                if self.freeze_overlay and self.freeze_overlay.isVisible():
-                    self._suspend_process(game_pid, app_name)
-                    if sys.platform == "win32":
-                        try:
-                            import ctypes
-                            ctypes.windll.user32.ClipCursor(None)
-                        except Exception:
-                            pass
-            QTimer.singleShot(30, do_pause)
-
-    def _on_freeze_closed(self):
-        """Коллбэк при закрытии оверлея изнутри (Esc / Q / клик по крестику)."""
-        # 1. Сначала возобновляем процесс игры
-        self._resume_paused_process(force=True)
-
-        # 2. Скрываем оверлей и попап
-        self.freeze_overlay = None
-        if self.popup and self.popup.isVisible():
-            self.popup.close_animated()
-
-        # 3. Возвращаем фокус окну игры
-        if getattr(self, "_saved_game_hwnd", None) and sys.platform == "win32":
-            try:
-                import ctypes
-                ctypes.windll.user32.SetForegroundWindow(self._saved_game_hwnd)
-            except Exception:
-                pass
-            self._saved_game_hwnd = None
-
-    def _on_freeze_word_clicked(self, w_clean: str, sentence: str, sx: int, sy: int, w: int, h: int, app_name: str, win_title: str):
-        if not w_clean:
-            return
-
-        shot_name = WORDS.save_screenshot(self._freeze_full_shot)
         self._pending_entry = {
             "src_lang": CONFIG.get("ocr_lang"),
             "dst_lang": CONFIG.get("looktionary_pro")["word_trans_lang"],
@@ -559,28 +666,213 @@ class Controller(QObject):
 
         import time
         self._popup_open_time = time.time()
-
         order = [k for k in CONFIG.get("sources_order") if CONFIG.get("sources_enabled").get(k)]
-        self.popup.open_at(sx + w // 2, sy + h, order, light=False)
-        self.popup.raise_()
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                HWND_TOPMOST = -1
-                SWP_NOMOVE = 0x0002
-                SWP_NOSIZE = 0x0001
-                SWP_SHOWWINDOW = 0x0040
-                ctypes.windll.user32.SetWindowPos(int(self.popup.winId()), HWND_TOPMOST, 0, 0, 0, 0,
-                                                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-            except Exception:
-                pass
-        self.popup.activateWindow()
+        self.popup.open_at(x, y, order, light=light_bg, target_word=w_clean)
         self._popup_open = True
 
         self._start_lookup_jobs(w_clean, sentence, app_name, order)
 
-    def run_dictionary_mode(self, x: int, y: int):
+    def _dispatch_dictionary_mode(self, x: int, y: int):
+        if CONFIG.get("freeze_screen"):
+            self.run_freeze_dictionary_mode(x, y)
+        else:
+            self.run_dictionary_mode(x, y)
+
+    def on_escape(self):
+        """Глобальный Esc: закрывает попап/оверлей даже если фокус не на них."""
+        self._popup_open = False
+        if self.freeze_overlay and self.freeze_overlay.isVisible():
+            self._close_freeze_mode()
+            return
+        if self.popup.isVisible():
+            self.popup.close_animated()      # окно сжимается и гаснет (не мгновенно)
+        if self.overlay and self.overlay.isVisible():
+            self.overlay.close()
+            self.overlay = None
+            self._resume_paused_process()
         self.close_highlight()
+
+    def _close_freeze_mode(self):
+        """Корректный выход из режима заморозки (Resume & Restore):
+        1. Сначала полностью скрываем оверлей (self.hide()).
+        2. Размораживаем процесс игры (NtResumeProcess и CloseHandle).
+        3. Даём потокам игры 15–20 мс проснуться, принудительно возвращаем фокус через AttachThreadInput и шлём WM_ACTIVATE.
+        4. Только после возврата фокуса закрываем/уничтожаем оверлей.
+        """
+        overlay = self.freeze_overlay
+        if not overlay and not getattr(self, "_saved_game_hwnd", None):
+            return
+        self.freeze_overlay = None
+
+        if self.popup and self.popup.isVisible():
+            self.popup.close_animated()
+
+        # Шаг 1: Сначала полностью скрываем оверлей, чтобы под курсором мыши физически оказалось окно игры
+        if overlay:
+            try:
+                overlay.hide()
+            except Exception:
+                pass
+
+        # Шаг 2: Размораживаем процесс игры (NtResumeProcess и CloseHandle)
+        self._resume_paused_process(force=True)
+
+        # Шаг 3: Даём потокам игры 15–20 мс проснуться, затем возвращаем фокус и закрываем оверлей
+        saved_hwnd = getattr(self, "_saved_game_hwnd", None)
+        self._saved_game_hwnd = None
+
+        def finish_exit():
+            if saved_hwnd:
+                restore_game_focus(saved_hwnd)
+            # Шаг 4: Только после возврата фокуса уничтожаем/закрываем виджет оверлея
+            if overlay:
+                try:
+                    overlay.close()
+                except Exception:
+                    pass
+
+        QTimer.singleShot(20, finish_exit)
+
+    def _on_freeze_closed(self):
+        """Коллбэк при закрытии оверлея (делегирует в _close_freeze_mode)."""
+        self._close_freeze_mode()
+
+    # ============================ РЕЖИМ СЛОВАРЯ ============================
+    def run_freeze_dictionary_mode(self, x: int, y: int):
+        """Режим «Заморозка экрана + Свободный курсор» для игр без видимого курсора."""
+        self._hide_active_popups_for_capture()
+
+        # До показа оверлея сохраняем game_hwnd и game_pid
+        app_name, win_title, game_pid, game_hwnd = active_window_title()
+        if sys.platform == "win32" and not game_hwnd:
+            try:
+                import ctypes
+                import ctypes.wintypes as wt
+                game_hwnd = int(ctypes.windll.user32.GetForegroundWindow())
+                pid_dw = wt.DWORD()
+                ctypes.windll.user32.GetWindowThreadProcessId(game_hwnd, ctypes.byref(pid_dw))
+                game_pid = int(pid_dw.value)
+            except Exception:
+                pass
+        self._saved_game_hwnd = game_hwnd
+        self._saved_game_pid = game_pid
+
+        self._check_fullscreenize(app_name, win_title, game_hwnd)
+
+        # 1. Сделай скриншот экрана
+        try:
+            img, mon = capture.grab_monitor_at(x, y)
+        except Exception as e:
+            self.bridge.error.emit(str(e))
+            self._resume_paused_process(force=True)
+            return
+
+        def on_word_clicked(w_clean: str, sentence: str, sx: int, sy: int, w: int, h: int):
+            if not w_clean:
+                return
+
+            # Скрываем оверлей и возобновляем процесс игры
+            if self.freeze_overlay:
+                try:
+                    self.freeze_overlay.hide()
+                except Exception:
+                    pass
+            self._close_freeze_mode()
+            self._discard_pending_screenshot()
+
+            # Формируем shot_img самостоятельно с учётом auto_crop_screenshots
+            if CONFIG.get("auto_crop_screenshots"):
+                lx = sx - mon["left"]
+                ly = sy - mon["top"]
+                pad = 120
+                box = (max(0, int(lx) - pad), max(0, int(ly) - pad),
+                       min(img.width, int(lx + w) + pad),
+                       min(img.height, int(ly + h) + pad))
+                shot_img = img.crop(box)
+            else:
+                shot_img = img
+            shot_name = WORDS.save_screenshot(shot_img)
+
+            self._pending_entry = {
+                "src_lang": CONFIG.get("ocr_lang"),
+                "dst_lang": CONFIG.get("looktionary_pro")["word_trans_lang"],
+                "dict_form": w_clean, "word_in_text": w_clean,
+                "context": sentence, "screenshot": shot_name,
+                "source_app": app_name, "source_title": win_title,
+                "complete": False,
+            }
+            existing_word = WORDS.find_by_word(w_clean)
+            if existing_word:
+                self._pending_entry["id"] = existing_word["id"]
+                self.bridge.bookmark_saved.emit(True)
+            elif CONFIG.get("auto_save_words", False):
+                self._pending_entry = WORDS.add(self._pending_entry)
+                self.bridge.words_changed.emit()
+                self.bridge.bookmark_saved.emit(True)
+            else:
+                self.bridge.bookmark_saved.emit(False)
+
+            anki_enabled = CONFIG.get("anki_enabled", False)
+            self.popup.set_anki_visible(anki_enabled)
+            if anki_enabled:
+                self.popup.set_anki_state("idle" if self._anki_connected else "disconnected")
+                self._check_anki_connection_async(word_to_check=w_clean)
+
+            import time
+            self._popup_open_time = time.time()
+
+            order = [k for k in CONFIG.get("sources_order") if CONFIG.get("sources_enabled").get(k)]
+            self.popup.open_at(sx + w // 2, sy + h, order, light=False, target_word=w_clean)
+            self.popup.raise_()
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    HWND_TOPMOST = -1
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_SHOWWINDOW = 0x0040
+                    ctypes.windll.user32.SetWindowPos(int(self.popup.winId()), HWND_TOPMOST, 0, 0, 0, 0,
+                                                     SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                except Exception:
+                    pass
+            self.popup.activateWindow()
+            self._popup_open = True
+
+            self._start_lookup_jobs(w_clean, sentence, app_name, order)
+
+        # 2. Создай self.freeze_overlay = FreezeFrameOverlay(...)
+        self.freeze_overlay = FreezeFrameOverlay(
+            img, mon,
+            on_word_clicked=on_word_clicked,
+            on_close=self._on_freeze_closed
+        )
+        self.freeze_overlay.setGeometry(mon["left"], mon["top"], mon["width"], mon["height"])
+        self.freeze_overlay.showFullScreen()
+        self.freeze_overlay.raise_()
+        self.freeze_overlay.activateWindow()
+
+        # 3. Сразу после показа оверлея (пока игра ещё НЕ на паузе!)
+        # вызови функцию принудительного перехвата фокуса (AttachThreadInput + SetForegroundWindow + ClipCursor(None) + ReleaseCapture())
+        force_foreground_and_release_cursor(self.freeze_overlay)
+
+        # 4. Запусти self.freeze_overlay._start_ocr_thread()
+        self.freeze_overlay._start_ocr_thread()
+
+        # 5. Вызови self._check_autopause(app_name, win_title, game_pid) через QTimer.singleShot(25, ...)
+        # (и внутри него после NtSuspendProcess продублируй user32.ClipCursor(None))
+        def do_pause():
+            if self.freeze_overlay and self.freeze_overlay.isVisible():
+                self._check_autopause(app_name, win_title, game_pid)
+                if sys.platform == "win32":
+                    try:
+                        import ctypes
+                        ctypes.windll.user32.ClipCursor(None)
+                    except Exception:
+                        pass
+        QTimer.singleShot(25, do_pause)
+
+    def run_dictionary_mode(self, x: int, y: int):
+        self._hide_active_popups_for_capture()
         app_name, win_title, pid, hwnd = active_window_title()
         self._check_autopause(app_name, win_title, pid)
         self._check_fullscreenize(app_name, win_title, hwnd)
@@ -633,6 +925,7 @@ class Controller(QObject):
                     int(left + word.x), int(top + word.y),
                     int(word.w), int(word.h))
                 w_clean = ocr.clean_word(word.text)
+                self.popup.set_target_word(w_clean)
                 sentence = ocr.sentence_around(lines, line, word)
 
                 # Если предыдущее слово не сохраняли в библиотеку — удаляем старый скриншот
@@ -692,6 +985,11 @@ class Controller(QObject):
 
     def _start_lookup_jobs(self, w_clean: str, sentence: str, app_name: str, order: list[str]):
         """Запуск асинхронных задач получения перевода и словарных статей."""
+        self._last_lookup_word = w_clean
+        self._last_lookup_sentence = sentence
+        self._last_lookup_order = list(order)
+        self._offline_found = {k: False for k in order}
+
         gem = get_ai(CONFIG)
 
         # --- Переводчик ---
@@ -724,14 +1022,17 @@ class Controller(QObject):
                 "looktionary_pro": do_looktionary}
 
         from app.dictionaries import DICTIONARIES, normalize_key
+        char_idx = sentence.find(w_clean) if sentence and w_clean in sentence else None
         for k in order:
             if k not in jobs:
                 def make_offline_job(src_key):
                     def do_offline():
                         try:
                             d_id = normalize_key(src_key)
-                            res = DICTIONARIES.lookup(w_clean, d_id, context=sentence)
-                            self.bridge.offline_dict_ready.emit(src_key, res)
+                            res = DICTIONARIES.lookup(w_clean, d_id, context=sentence, char_index=char_idx)
+                            if res:
+                                self._offline_found[src_key] = True
+                            self.bridge.offline_dict_ready.emit(src_key, res, False)
                             if res and self._pending_entry is not None:
                                 if "offline_entries" not in self._pending_entry:
                                     self._pending_entry["offline_entries"] = []
@@ -766,6 +1067,31 @@ class Controller(QObject):
             self._pending_entry.update(data)
             if data.get("definition") or data.get("word_translation"):
                 self._pending_entry["complete"] = True
+
+        # Если ИИ определил словарную форму (lemma/headword), которая отличается от исходного слова (например, お願い вместо 願 или 부탁하다 вместо 부탁합니다),
+        # и какой-либо из офлайн-словарей не нашёл статью по исходному слову — дозапрашиваем словарную форму в фоновом потоке
+        dict_form = (data.get("dict_form") or "").strip()
+        last_word = getattr(self, "_last_lookup_word", "")
+        if dict_form and dict_form.lower() != last_word.lower():
+            sentence = getattr(self, "_last_lookup_sentence", "")
+            order = getattr(self, "_last_lookup_order", [])
+            from app.dictionaries import DICTIONARIES, normalize_key
+            for k in order:
+                if k not in ("translator_pro", "looktionary_pro") and not self._offline_found.get(k, False):
+                    def do_retry_offline(src_key, term=dict_form):
+                        try:
+                            d_id = normalize_key(src_key)
+                            retry_res = DICTIONARIES.lookup(term, d_id, context=sentence)
+                            if retry_res:
+                                self._offline_found[src_key] = True
+                                self.bridge.offline_dict_ready.emit(src_key, retry_res, True)
+                                if self._pending_entry is not None:
+                                    if "offline_entries" not in self._pending_entry:
+                                        self._pending_entry["offline_entries"] = []
+                                    self._pending_entry["offline_entries"].extend(retry_res)
+                        except Exception:
+                            pass
+                    threading.Thread(target=do_retry_offline, args=(k,), daemon=True).start()
 
     def toggle_pending_bookmark(self):
         """Клик по кнопке закладки (🔖 / ✅) в попапе."""
@@ -886,6 +1212,7 @@ class Controller(QObject):
 
     # ========================== РЕЖИМ ПЕРЕВОДЧИКА ==========================
     def run_translator_mode(self, x: int, y: int):
+        self._hide_active_popups_for_capture()
         app_name, win_title, pid, hwnd = active_window_title()
         self._check_autopause(app_name, win_title, pid)
         self._check_fullscreenize(app_name, win_title, hwnd)

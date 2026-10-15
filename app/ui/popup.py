@@ -71,6 +71,14 @@ class SourceSection(QFrame):
             self._loading.deleteLater()
             self._loading = None
 
+    def clear_body(self):
+        self.clear_loading()
+        while self.body.count():
+            item = self.body.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
     def add(self, w):
         self.clear_loading()
         self.body.addWidget(w)
@@ -414,9 +422,14 @@ class DictionaryPopup(QWidget):
         l.setStyleSheet("font-size: 14px; background: transparent;")
         return l
 
+    def set_target_word(self, word: str):
+        """Устанавливает целевое слово для корректной подсветки в секции Переводчика."""
+        self._current_target_word = word
+
     # ------------------------------------------------------------------
-    def open_at(self, x: int, y: int, sources: list[str], light: bool = False):
+    def open_at(self, x: int, y: int, sources: list[str], light: bool = False, target_word: str = ""):
         """Создаёт пустые секции в порядке источников и показывает окно у курсора."""
+        self._current_target_word = target_word
         self._apply_theme(light)
         # очистка
         while self.body.count() > 1:
@@ -695,6 +708,23 @@ class DictionaryPopup(QWidget):
         sec = self.sections.get("translator_pro")
         if not sec:
             return
+
+        target_word = getattr(self, "_current_target_word", "")
+        # Если строка содержит исходное предложение и перевод, разделённые двоеточием
+        if ":" in translation_html or "：" in translation_html:
+            delim = ":" if ":" in translation_html else "："
+            orig_part, trans_part = translation_html.split(delim, 1)
+            # Убираем ложные <u> теги с части перевода после двоеточия
+            trans_part = trans_part.replace("<u>", "").replace("</u>", "")
+            orig_part = orig_part.replace("<u>", "").replace("</u>", "")
+            # Оборачиваем именно целевое слово (word_in_text) в исходном предложении
+            if target_word and target_word in orig_part:
+                orig_part = orig_part.replace(target_word, f"<u>{target_word}</u>", 1)
+            translation_html = f"{orig_part}{delim}{trans_part}"
+        elif target_word and target_word in translation_html:
+            clean = translation_html.replace("<u>", "").replace("</u>", "")
+            translation_html = clean.replace(target_word, f"<u>{target_word}</u>", 1)
+
         if CONFIG.get("translator_pro")["hide_in_dict_mode"]:
             sp = Spoiler(translation_html.replace("<u>", "").replace("</u>", ""),
                          self.c["spoiler"])
@@ -777,13 +807,16 @@ class DictionaryPopup(QWidget):
             sec.add(coll)
         QTimer.singleShot(0, self._fit_to_content)
 
-    def fill_offline_dict(self, key: str, entries: list[dict]):
+    def fill_offline_dict(self, key: str, entries: list[dict], replace: bool = False):
         sec = self.sections.get(key)
         if not sec:
             return
+        if replace:
+            sec.clear_body()
         if not entries:
-            sec.fail(_tr("Нет статьи в этом словаре."))
-            QTimer.singleShot(0, self._fit_to_content)
+            if not replace:
+                sec.fail(_tr("Нет статьи в этом словаре."))
+                QTimer.singleShot(0, self._fit_to_content)
             return
 
         for idx, entry in enumerate(entries, 1):

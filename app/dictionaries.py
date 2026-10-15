@@ -555,6 +555,248 @@ def deinflect_english(w: str) -> list[str]:
     """Обратная совместимость: возвращает только список лемм без тегов."""
     return [c for c, _ in deinflect_english_with_tags(w)]
 
+def deinflect_japanese_with_tags(w: str) -> list[tuple[str, str]]:
+    """Деинфлекция японских глаголов и прилагательных (Yomitan Japanese Deinflector).
+    Например: 食べました -> 食べる, 早く -> 早い, お願いします -> お願い / 願う."""
+    w = w.strip()
+    if not w or len(w) < 2:
+        return []
+
+    candidates: list[tuple[str, str]] = []
+    def add(c: str, tag: str):
+        if c and len(c) >= 1 and c != w and not any(x[0] == c for x in candidates):
+            candidates.append((c, tag))
+
+    def process_stem_shi(stem_shi: str, tag_prefix: str):
+        """Обработка основы на -し (от глагола する или вежливых форм):
+        stem_shi: например 'お願いし' или '勉強し' -> основа 'お願い' / '勉強'."""
+        if stem_shi.endswith("し") and len(stem_shi) >= 2:
+            base = stem_shi[:-1]
+            add(base, f"{tag_prefix} noun/suru base")
+            add(base + "する", f"{tag_prefix} suru verb")
+            # Если основа с префиксом вежливости お / ご / 御
+            for pfx in ("お", "ご", "御"):
+                if base.startswith(pfx) and len(base) > len(pfx):
+                    unpfx = base[len(pfx):]
+                    add(unpfx, "base without prefix")
+                    if unpfx.endswith("い"):
+                        add(unpfx[:-1] + "う", "godan verb")
+                        add(unpfx[:-1] + "る", "ichidan verb")
+                    elif unpfx.endswith("し"):
+                        add(unpfx[:-1] + "す", "godan verb")
+                    add(unpfx + "う", "godan verb")
+                    add(unpfx + "る", "ichidan verb")
+                    add(unpfx + "する", "suru verb")
+                if stem_shi.startswith(pfx) and len(stem_shi) > len(pfx):
+                    unpfx_shi = stem_shi[len(pfx):]
+                    if unpfx_shi.endswith("し"):
+                        add(unpfx_shi[:-1] + "す", "godan verb")
+
+    # 1. Префиксы вежливости и отрицания: お / ご / 御
+    for pfx in ("お", "ご", "御"):
+        if w.startswith(pfx) and len(w) > 1:
+            raw = w[len(pfx):]
+            add(raw, "prefix " + pfx)
+            if not raw.endswith(("ます", "ました", "ません", "ない", "て", "た", "ている", "ていた")):
+                if raw.endswith("い"):
+                    add(raw[:-1] + "う", "godan verb from " + pfx)
+                    add(raw[:-1] + "る", "ichidan verb from " + pfx)
+                add(raw + "う", "godan verb from " + pfx)
+                add(raw + "る", "ichidan verb from " + pfx)
+                add(raw + "する", "suru verb from " + pfx)
+
+    # 2. Формы глагола する напрямую
+    suru_forms = (
+        ("しました", "past polite"), ("しませんでした", "past neg polite"),
+        ("します", "polite"), ("しません", "neg polite"),
+        ("しないで", "te-negative"), ("しない", "negative"),
+        ("しなかった", "past negative"),
+        ("して", "te-form"), ("した", "past"),
+    )
+    for s_end, s_tag in suru_forms:
+        if w.endswith(s_end) and len(w) > len(s_end):
+            base = w[:-len(s_end)]
+            add(base, f"suru base ({s_tag})")
+            add(base + "する", f"suru verb ({s_tag})")
+            process_stem_shi(base, s_tag)
+            for pfx in ("お", "ご", "御"):
+                if base.startswith(pfx) and len(base) > len(pfx):
+                    unpfx = base[len(pfx):]
+                    add(unpfx, "unprefixed noun")
+                    if unpfx.endswith("い"):
+                        add(unpfx[:-1] + "う", "godan verb")
+                        add(unpfx[:-1] + "る", "ichidan verb")
+                    elif unpfx.endswith("し"):
+                        add(unpfx[:-1] + "す", "godan verb")
+                    add(unpfx + "う", "godan verb")
+                    add(unpfx + "る", "ichidan verb")
+                    add(unpfx + "する", "suru verb")
+
+    # 3. Вежливые формы на -ます
+    if w.endswith("ませんでした") and len(w) > 6:
+        stem = w[:-6]
+        add(stem + "る", "past negative polite")
+        add(stem + "う", "past negative polite")
+        process_stem_shi(stem, "masu")
+    elif w.endswith("ました") and len(w) > 3:
+        stem = w[:-3]
+        add(stem, "masu stem")
+        add(stem + "る", "past polite")
+        add(stem + "う", "past polite")
+        process_stem_shi(stem, "masu")
+    elif w.endswith("ません") and len(w) > 3:
+        stem = w[:-3]
+        add(stem + "る", "negative polite")
+        add(stem + "う", "negative polite")
+        process_stem_shi(stem, "masu")
+    elif w.endswith("ます") and len(w) > 2:
+        stem = w[:-2]
+        add(stem, "masu stem")
+        add(stem + "る", "polite")
+        add(stem + "う", "polite")
+        # Годан: い-звук в う-звук (напр. 書きます -> 書く, 泳ぎます -> 泳ぐ, 話します -> 話す)
+        godan_map = {"き": "く", "ぎ": "ぐ", "し": "す", "ち": "つ", "に": "ぬ", "び": "ぶ", "み": "む", "り": "る", "い": "う"}
+        if stem and stem[-1] in godan_map:
+            add(stem[:-1] + godan_map[stem[-1]], "godan polite")
+        process_stem_shi(stem, "masu")
+
+    # Отрицание на -ない
+    if w.endswith("なかった") and len(w) > 4:
+        stem = w[:-4]
+        add(stem + "い", "past negative adj")
+        add(stem + "る", "past negative")
+        a_to_u = {"か": "く", "が": "ぐ", "さ": "す", "た": "つ", "な": "ぬ", "ば": "ぶ", "ま": "む", "ら": "る", "わ": "う"}
+        if stem and stem[-1] in a_to_u:
+            add(stem[:-1] + a_to_u[stem[-1]], "past negative")
+    elif w.endswith("ない") and len(w) > 2:
+        stem = w[:-2]
+        add(stem + "る", "negative")
+        add(stem + "い", "negative adj")
+        a_to_u = {"か": "く", "が": "ぐ", "さ": "す", "た": "つ", "な": "ぬ", "ば": "ぶ", "ま": "む", "ら": "る", "わ": "う"}
+        if stem and stem[-1] in a_to_u:
+            add(stem[:-1] + a_to_u[stem[-1]], "negative")
+
+    # Длительная форма на -ている
+    if w.endswith("ている") and len(w) > 3:
+        add(w[:-3] + "る", "progressive")
+    elif w.endswith("ていた") and len(w) > 3:
+        add(w[:-3] + "る", "past progressive")
+    elif w.endswith("て") and len(w) > 1:
+        stem = w[:-1]
+        add(stem + "る", "te-form")
+        process_stem_shi(stem, "te")
+        if stem.endswith("っ"):
+            add(stem[:-1] + "う", "te-form")
+            add(stem[:-1] + "つ", "te-form")
+            add(stem[:-1] + "る", "te-form")
+        elif stem.endswith("い"):
+            add(stem[:-1] + "く", "te-form")
+        elif stem.endswith("し"):
+            add(stem[:-1] + "す", "te-form")
+        elif stem.endswith("ん"):
+            add(stem[:-1] + "む", "te-form")
+            add(stem[:-1] + "ぶ", "te-form")
+            add(stem[:-1] + "ぬ", "te-form")
+    elif w.endswith("で") and len(w) > 1:
+        stem = w[:-1]
+        if stem.endswith("ん"):
+            add(stem[:-1] + "む", "te-form")
+            add(stem[:-1] + "ぶ", "te-form")
+            add(stem[:-1] + "ぬ", "te-form")
+        elif stem.endswith("い"):
+            add(stem[:-1] + "ぐ", "te-form")
+
+    # Прошедшее время на -た / -だ
+    if w.endswith("た") and len(w) > 1:
+        stem = w[:-1]
+        add(stem + "る", "past")
+        process_stem_shi(stem, "ta")
+        if stem.endswith("っ"):
+            add(stem[:-1] + "う", "past")
+            add(stem[:-1] + "つ", "past")
+            add(stem[:-1] + "る", "past")
+        elif stem.endswith("い"):
+            add(stem[:-1] + "く", "past")
+        elif stem.endswith("し"):
+            add(stem[:-1] + "す", "past")
+        elif stem.endswith("ん"):
+            add(stem[:-1] + "む", "past")
+            add(stem[:-1] + "ぶ", "past")
+            add(stem[:-1] + "ぬ", "past")
+    elif w.endswith("だ") and len(w) > 1:
+        stem = w[:-1]
+        if stem.endswith("ん"):
+            add(stem[:-1] + "む", "past")
+            add(stem[:-1] + "ぶ", "past")
+            add(stem[:-1] + "ぬ", "past")
+        elif stem.endswith("い"):
+            add(stem[:-1] + "ぐ", "past")
+
+    # Прилагательные на -い (-かった, -くて, -く)
+    if w.endswith("かった") and len(w) > 3:
+        add(w[:-3] + "い", "past adj")
+    elif w.endswith("くて") and len(w) > 2:
+        add(w[:-2] + "い", "te-adj")
+    elif w.endswith("く") and len(w) > 1:
+        add(w[:-1] + "い", "adv adj")
+
+    # Пассив / потенциал (-れる, -られる)
+    if w.endswith("られる") and len(w) > 3:
+        add(w[:-3] + "る", "passive/potential")
+    elif w.endswith("れる") and len(w) > 2:
+        add(w[:-2] + "る", "passive")
+
+    return candidates
+
+def stem_korean_with_tags(w: str) -> list[tuple[str, str]]:
+    """Стемминг корейских частиц и глагольных окончаний.
+    Например: 부탁합니다 -> 부탁하다, 사과를 -> 사과, 먹었어요 -> 먹다."""
+    w = w.strip()
+    if not w or len(w) < 2:
+        return []
+
+    candidates: list[tuple[str, str]] = []
+    def add(c: str, tag: str):
+        if c and len(c) >= 1 and c != w and not any(x[0] == c for x in candidates):
+            candidates.append((c, tag))
+
+    # 1. Глагольные и связочные окончания
+    verb_endings = (
+        ("하셨습니다", "honorific past"), ("했습니다", "past polite"), ("하였습니다", "past polite"),
+        ("합니다", "polite present"), ("습니다", "formal present"), ("ㅂ니다", "formal present"),
+        ("했어요", "polite past"), ("하나요", "question"), ("하세요", "honorific"),
+        ("해요", "polite present"), ("였다", "past"), ("았다", "past"), ("었다", "past"), ("했다", "past"),
+        ("았어요", "past polite"), ("었어요", "past polite"), ("아요", "polite present"), ("어요", "polite present"),
+        ("하고", "connective"), ("이고", "connective"), ("는데", "connective"), ("은데", "connective"),
+        ("으면", "conditional"), ("면", "conditional"), ("어서", "cause"), ("아서", "cause"), ("지만", "adversative"),
+    )
+    for ending, tag in verb_endings:
+        if w.endswith(ending) and len(w) > len(ending):
+            stem = w[:-len(ending)]
+            add(stem, "stem")
+            add(stem + "하다", "verb lemma 하다")
+            add(stem + "다", "verb lemma 다")
+            if ending.startswith("하") or "했" in ending:
+                add(stem + "하다", "verb lemma")
+
+    # 2. Падежные частицы
+    particles = (
+        ("에서는", "particle"), ("으로는", "particle"), ("한테서", "particle"),
+        ("에서", "particle 에서"), ("으로", "particle 으로"), ("에게", "particle 에게"),
+        ("한테", "particle 한테"), ("까지", "particle 까지"), ("부터", "particle 부터"),
+        ("처럼", "particle 처럼"), ("은", "topic 은"), ("는", "topic 는"),
+        ("이", "subject 이"), ("가", "subject 가"), ("을", "object 을"),
+        ("를", "object 를"), ("에", "location/time 에"), ("로", "direction/means 로"),
+        ("도", "particle 도"), ("만", "particle 만"), ("의", "possessive 의"),
+        ("과", "with 과"), ("와", "with 와"),
+    )
+    for part, tag in particles:
+        if w.endswith(part) and len(w) > len(part):
+            stem = w[:-len(part)]
+            add(stem, tag)
+
+    return candidates
+
 
 class DictionaryManager:
     def __init__(self):
@@ -711,7 +953,8 @@ class DictionaryManager:
         query += " ORDER BY t.score DESC, t.seq ASC"
         return conn.execute(query, params).fetchall()
 
-    def lookup(self, word: str, dict_id: str | None = None, context: str | None = None) -> list[dict]:
+    def lookup(self, word: str, dict_id: str | None = None, context: str | None = None,
+               char_index: int | None = None) -> list[dict]:
         """Поиск слова во всех включённых офлайн-словарях (или в конкретном dict_id).
         Поддерживает деинфлекцию/лемматизацию в точности как в Yomitan:
         - удовлетворяет запросы по непрямым формам (satisfying -> satisfie, satisfy)
@@ -723,17 +966,28 @@ class DictionaryManager:
         if not w:
             return []
 
-        # Для слитного восточноазиатского текста (японский/китайский):
-        # проверяем составные слова от самого длинного к короткому (алгоритм Yomitan)
-        if context and word in context and len(word) <= 3:
-            idx = context.find(word)
-            sub = context[idx:idx + 12]
-            sub_clean = re.split(r'[\s.,!?;:…«»\(\)\[\]{}—\-\'"_]', sub)[0]
-            for length in range(len(sub_clean), len(word), -1):
-                cand = sub_clean[:length]
-                cand_res = self.lookup(cand, dict_id)
-                if cand_res:
-                    return cand_res
+        # Для слитного восточноазиатского текста (японский / китайский / корейский):
+        # проверяем составные слова от самого длинного к короткому (алгоритм Yomitan Longest Match)
+        if context and (word in context or (char_index is not None and 0 <= char_index < len(context))) and len(word) <= 4:
+            if char_index is not None and 0 <= char_index < len(context):
+                idx = char_index
+            else:
+                idx = context.find(word)
+            if idx >= 0:
+                start_idx = idx
+                # Захватываем 1-2 префикса слева (напр. お, ご, 御, 不, 第, 無, 非, 超, 最, 大)
+                for _ in range(2):
+                    if start_idx > 0 and context[start_idx - 1] in ("お", "ご", "御", "不", "第", "無", "非", "超", "最", "大"):
+                        start_idx -= 1
+
+                sub = context[start_idx:idx + len(word) + 10]
+                sub_clean = re.split(r'[\s.,!?;:…«»\(\)\[\]{}—\-\'"_「」『』【】・…！？：；、。]', sub)[0]
+                if len(sub_clean) > len(word):
+                    for length in range(len(sub_clean), len(word), -1):
+                        cand = sub_clean[:length]
+                        cand_res = self.lookup(cand, dict_id)
+                        if cand_res:
+                            return cand_res
 
         with _DB_LOCK:
             with self._get_conn() as conn:
@@ -754,6 +1008,20 @@ class DictionaryManager:
                 for cand, tag in deinflect_english_with_tags(w):
                     c_norm = cand.strip().lower()
                     if c_norm and c_norm not in seen_candidates and c_norm != w:
+                        seen_candidates.add(c_norm)
+                        candidates.append((cand.strip(), tag))
+
+                # 2b. Деинфлекция по правилам японского языка (Yomitan Japanese Deinflector)
+                for cand, tag in deinflect_japanese_with_tags(word):
+                    c_norm = cand.strip()
+                    if c_norm and c_norm not in seen_candidates and c_norm != word:
+                        seen_candidates.add(c_norm)
+                        candidates.append((cand.strip(), tag))
+
+                # 2c. Стемминг корейских частиц и глагольных окончаний
+                for cand, tag in stem_korean_with_tags(word):
+                    c_norm = cand.strip()
+                    if c_norm and c_norm not in seen_candidates and c_norm != word:
                         seen_candidates.add(c_norm)
                         candidates.append((cand.strip(), tag))
 
