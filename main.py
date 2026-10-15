@@ -133,6 +133,7 @@ from app import capture, ocr
 from app.gemini import get_ai, GeminiError
 from app.hotkeys import HotkeyManager, parse_hotkey
 from app.ui.main_window import MainWindow, make_app_icon
+from app.ui.theme import IS_WIN11, IS_WIN10
 from app.ui.popup import DictionaryPopup
 from app.ui.overlay import (TranslationOverlay, WordHighlight, FreezeFrameOverlay,
                             force_foreground_and_release_cursor, restore_game_focus)
@@ -494,12 +495,13 @@ class Controller(QObject):
                 WS_SYSMENU = 0x00080000
                 SWP_FRAMECHANGED = 0x0020
                 SWP_SHOWWINDOW = 0x0040
+                SWP_NOZORDER = 0x0004
                 style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
                 style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)
                 ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
                 w = ctypes.windll.user32.GetSystemMetrics(0)
                 h = ctypes.windll.user32.GetSystemMetrics(1)
-                ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW)
+                ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOZORDER)
             except Exception as e:
                 print("fullscreenize error:", e)
 
@@ -782,12 +784,29 @@ class Controller(QObject):
 
             # Формируем shot_img самостоятельно с учётом auto_crop_screenshots
             if CONFIG.get("auto_crop_screenshots"):
-                lx = sx - mon["left"]
-                ly = sy - mon["top"]
+                if not IS_WIN11:
+                    from PySide6.QtGui import QGuiApplication
+                    scr = (QGuiApplication.screenAt(QPoint(sx, sy)) or QGuiApplication.primaryScreen())
+                    dpr = scr.devicePixelRatio() if scr else 1.0
+                    if dpr > 0 and dpr != 1.0:
+                        lx = int((sx - (scr.geometry().left() if scr else 0)) * dpr)
+                        ly = int((sy - (scr.geometry().top() if scr else 0)) * dpr)
+                        cw = int(w * dpr)
+                        ch = int(h * dpr)
+                    else:
+                        lx = sx - mon["left"]
+                        ly = sy - mon["top"]
+                        cw = w
+                        ch = h
+                else:
+                    lx = sx - mon["left"]
+                    ly = sy - mon["top"]
+                    cw = w
+                    ch = h
                 pad = 120
                 box = (max(0, int(lx) - pad), max(0, int(ly) - pad),
-                       min(img.width, int(lx + w) + pad),
-                       min(img.height, int(ly + h) + pad))
+                       min(img.width, int(lx + cw) + pad),
+                       min(img.height, int(ly + ch) + pad))
                 shot_img = img.crop(box)
             else:
                 shot_img = img
@@ -921,9 +940,26 @@ class Controller(QObject):
                         )
                     return
                 # подсветка найденного слова прямо на экране (экранные координаты)
-                self.bridge.highlight_ready.emit(
-                    int(left + word.x), int(top + word.y),
-                    int(word.w), int(word.h))
+                if not IS_WIN11:
+                    from PySide6.QtGui import QGuiApplication
+                    scr = (QGuiApplication.screenAt(QPoint(x, y)) or QGuiApplication.primaryScreen())
+                    dpr = scr.devicePixelRatio() if scr else 1.0
+                    if dpr > 0 and dpr != 1.0:
+                        hw_x = int((left + word.x) / dpr)
+                        hw_y = int((top + word.y) / dpr)
+                        hw_w = int(word.w / dpr)
+                        hw_h = int(word.h / dpr)
+                    else:
+                        hw_x = int(left + word.x)
+                        hw_y = int(top + word.y)
+                        hw_w = int(word.w)
+                        hw_h = int(word.h)
+                else:
+                    hw_x = int(left + word.x)
+                    hw_y = int(top + word.y)
+                    hw_w = int(word.w)
+                    hw_h = int(word.h)
+                self.bridge.highlight_ready.emit(hw_x, hw_y, hw_w, hw_h)
                 w_clean = ocr.clean_word(word.text)
                 self.popup.set_target_word(w_clean)
                 sentence = ocr.sentence_around(lines, line, word)
@@ -1340,6 +1376,12 @@ def main():
                 sys.exit(0)
         except Exception:
             pass
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
 
     app = QApplication(sys.argv)
     app.setApplicationName("WordSnap")

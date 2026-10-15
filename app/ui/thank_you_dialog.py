@@ -11,7 +11,7 @@ from .theme import P, ACCENT, TEXT, TEXT_DIM, BG_CARD, BORDER, apply_native_wind
 from .i18n import t
 
 DONATION_URL = "https://www.donationalerts.com/r/wefdzen"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 _active_dialog = None
 

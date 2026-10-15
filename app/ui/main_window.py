@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
                                QPushButton, QStackedWidget, QFrame, QMessageBox, QSizeGrip)
 
 from ..config import app_dir
-from .theme import QSS, ACCENT, ICON, BG, is_windows_11, save_window_size, restore_window_size
+from .theme import QSS, ACCENT, ICON, BG, is_windows_11, IS_WIN11, IS_WIN10, save_window_size, restore_window_size
 from .i18n import t
 from .words_page import WordsPage
 from .dicts_page import DictsPage
@@ -268,7 +268,7 @@ class MainWindow(QMainWindow):
                     pass
 
             # Windows 11 (билд 22000+): нативное скругление углов и цвет обводки
-            if is_windows_11():
+            if IS_WIN11:
                 try:
                     ctypes.windll.dwmapi.DwmSetWindowAttribute(
                         hwnd, 33, ctypes.byref(ctypes.c_int(2)), ctypes.sizeof(ctypes.c_int)
@@ -303,9 +303,8 @@ class MainWindow(QMainWindow):
 
     def _update_border_style(self):
         is_max = self.isMaximized()
-        is_win11 = is_windows_11()
         from .theme import P, BORDER
-        radius = "8px" if (is_win11 and not is_max) else "0px"
+        radius = "8px" if (IS_WIN11 and not is_max) else "0px"
         border_col = "none" if is_max else f"1px solid {BORDER}"
         self._root.setStyleSheet(f"""
             #Root {{
@@ -321,7 +320,7 @@ class MainWindow(QMainWindow):
                 }
             """)
             if hasattr(self.titlebar, "btn_close") and self.titlebar.btn_close:
-                close_radius = "7px" if (is_win11 and not is_max) else "0px"
+                close_radius = "7px" if (IS_WIN11 and not is_max) else "0px"
                 self.titlebar.btn_close.setStyleSheet(f"""
                     #CloseBtn {{
                         background: transparent;

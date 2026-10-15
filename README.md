@@ -2,7 +2,7 @@
   <img src="assets/icon.png" width="100" alt="WordSnap">
 </p>
 
-<h1 align="center">WordSnap v1.3.0</h1>
+<h1 align="center">WordSnap v1.3.1</h1>
 
 <p align="center">
   <b>Instant on-screen OCR translator, offline Yomitan dictionary & Anki study cards for Windows.</b><br>
@@ -27,7 +27,7 @@
 - **Dual AI Translation (Groq & Google Gemini)** — Context-aware sentence translation tailored to game lore, plus Looktionary cards with CEFR level (A1–C2), synonyms, and definitions.
 - **1-Click Anki Integration** — Direct connection via AnkiConnect: create flashcards with cropped scene screenshots, sentence context, audio TTS, and duplicate detection.
 - **Personal Vocabulary ("Words" tab)** — Review saved words with original scene screenshots, TTS pronunciation, date/CEFR/tag filters, and export to CSV, JSON, and Anki TSV.
-- **Fluent UI for Windows 10/11** — Modern dark/light themes, native rounded corners, and system tray minimization with zero-drift window position persistence.
+- **Fluent UI for Windows 10/11** — Modern dark/light themes, native rounded corners, manual & automatic edge resizing, and system tray minimization with zero-drift window position persistence.
 
 ---
 
@@ -37,8 +37,8 @@ Pre-built binaries are available in **[Releases](../../releases)**:
 
 | Distribution | Description | Download |
 |---|---|---|
-| **Installer (Setup)** | Standard Windows installer with shortcuts and uninstaller | [`WordSnap-1.3.0-Setup.exe`](../../releases) |
-| **Portable (ZIP)** | Zero-installation, extract and run anywhere (e.g. USB drive) | [`WordSnap-1.3.0-Portable.zip`](../../releases) |
+| **Installer (Setup)** | Standard Windows installer with shortcuts and uninstaller | [`WordSnap-1.3.1-Setup.exe`](../../releases) |
+| **Portable (ZIP)** | Zero-installation, extract and run anywhere (e.g. USB drive) | [`WordSnap-1.3.1-Portable.zip`](../../releases) |
 
 ---
 

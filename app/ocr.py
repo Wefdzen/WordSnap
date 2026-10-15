@@ -56,8 +56,9 @@ def check_windows_ocr_language(lang_code: str) -> tuple[bool, str, list[str]]:
             from winrt.windows.media.ocr import OcrEngine as WinOcr
             from winrt.windows.globalization import Language
         except ImportError:
-            from winsdk.windows.media.ocr import OcrEngine as WinOcr
-            from winsdk.windows.globalization import Language
+            import importlib
+            WinOcr = importlib.import_module("winsdk.windows.media.ocr").OcrEngine
+            Language = importlib.import_module("winsdk.windows.globalization").Language
 
         for lng in WinOcr.available_recognizer_languages:
             avail.append(lng.display_name)
@@ -158,13 +159,22 @@ class WindowsOcrEngine:
         try:  # новый pywinrt (Python 3.13/3.14+)
             from winrt.windows.media.ocr import OcrEngine as WinOcr
             from winrt.windows.globalization import Language
-            from winrt.windows.graphics.imaging import BitmapDecoder
+            from winrt.windows.graphics.imaging import (
+                BitmapDecoder, BitmapPixelFormat, BitmapAlphaMode, SoftwareBitmap
+            )
             from winrt.windows.storage.streams import InMemoryRandomAccessStream, DataWriter
         except ImportError:  # устаревший winsdk (Python <= 3.12)
-            from winsdk.windows.media.ocr import OcrEngine as WinOcr
-            from winsdk.windows.globalization import Language
-            from winsdk.windows.graphics.imaging import BitmapDecoder
-            from winsdk.windows.storage.streams import InMemoryRandomAccessStream, DataWriter
+            import importlib
+            WinOcr = importlib.import_module("winsdk.windows.media.ocr").OcrEngine
+            Language = importlib.import_module("winsdk.windows.globalization").Language
+            _img_mod = importlib.import_module("winsdk.windows.graphics.imaging")
+            BitmapDecoder = _img_mod.BitmapDecoder
+            BitmapPixelFormat = _img_mod.BitmapPixelFormat
+            BitmapAlphaMode = _img_mod.BitmapAlphaMode
+            SoftwareBitmap = _img_mod.SoftwareBitmap
+            _streams_mod = importlib.import_module("winsdk.windows.storage.streams")
+            InMemoryRandomAccessStream = _streams_mod.InMemoryRandomAccessStream
+            DataWriter = _streams_mod.DataWriter
 
         buf = io.BytesIO()
         image.save(buf, format="PNG")
@@ -198,7 +208,32 @@ class WindowsOcrEngine:
             msg = get_ocr_missing_instructions(self.lang_tag, avail)
             raise RuntimeError(msg)
 
-        result = await engine.recognize_async(bitmap)
+        try:
+            result = await engine.recognize_async(bitmap)
+        except Exception:
+            # На Windows 10 старых ревизий API BitmapDecoder может требовать конвертации
+            # SoftwareBitmap в формат Bgra8 / Premultiplied перед передачей в recognize_async
+            bgra8 = getattr(BitmapPixelFormat, "BGRA8", getattr(BitmapPixelFormat, "Bgra8", None))
+            premul = getattr(BitmapAlphaMode, "PREMULTIPLIED", getattr(BitmapAlphaMode, "Premultiplied", None))
+            converted = None
+            if bgra8 is not None and premul is not None:
+                try:
+                    converted = SoftwareBitmap.convert(bitmap, bgra8, premul)
+                except Exception:
+                    try:
+                        converted = SoftwareBitmap.convert(bitmap, bgra8)
+                    except Exception:
+                        converted = None
+            elif bgra8 is not None:
+                try:
+                    converted = SoftwareBitmap.convert(bitmap, bgra8)
+                except Exception:
+                    converted = None
+
+            if converted is not None:
+                result = await engine.recognize_async(converted)
+            else:
+                raise
         lines: list[OcrLine] = []
         for line in result.lines:
             words = []
@@ -444,9 +479,10 @@ def get_engine(cfg) -> "WindowsOcrEngine | TesseractEngine":
         except ImportError:
             pass
         try:
-            import winsdk  # noqa: F401
+            import importlib
+            importlib.import_module("winsdk")
             return WindowsOcrEngine(lang)
-        except ImportError:
+        except Exception:
             pass
     return TesseractEngine(lang)
 

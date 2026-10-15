@@ -9,15 +9,13 @@
 import sys
 from ..config import CONFIG
 
+IS_WIN11 = sys.platform == "win32" and sys.getwindowsversion().build >= 22000
+IS_WIN10 = sys.platform == "win32" and sys.getwindowsversion().build < 22000
+
 
 def is_windows_11() -> bool:
     """Проверяет, работает ли приложение на Windows 11 (билд 22000+)."""
-    if sys.platform != "win32":
-        return False
-    try:
-        return sys.getwindowsversion().build >= 22000
-    except Exception:
-        return False
+    return IS_WIN11
 
 
 def is_windows_10_or_newer() -> bool:
@@ -46,7 +44,7 @@ def apply_native_window_theme(hwnd: int):
                 pass
 
         # Windows 11 (билд 22000+): нативное скругление углов диалогов и окон
-        if is_windows_11():
+        if IS_WIN11:
             try:
                 # DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(

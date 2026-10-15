@@ -17,7 +17,7 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 APP_NAME = "WordSnap"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(ROOT_DIR, "dist", APP_NAME)
 RELEASE_DIR = os.path.join(ROOT_DIR, "release")

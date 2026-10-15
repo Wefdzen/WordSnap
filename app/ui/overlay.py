@@ -1,9 +1,10 @@
 """Режим переводчика: полноэкранный оверлей, рисующий перевод поверх
 распознанных строк текста (как в Translumo)."""
 import sys
-from PySide6.QtCore import Qt, QRect, Signal
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPixmap, QImage, QCursor, QPen
+from PySide6.QtCore import Qt, QRect, QPoint, Signal
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPixmap, QImage, QCursor, QPen, QGuiApplication
 from PySide6.QtWidgets import QWidget
+from .theme import IS_WIN11, IS_WIN10
 
 
 class TranslationOverlay(QWidget):
@@ -19,8 +20,18 @@ class TranslationOverlay(QWidget):
             self.setWindowFlag(Qt.WindowTransparentForInput, True)
         self.items = items
         self.frozen = frozen_pixmap
-        self.setGeometry(geometry["left"], geometry["top"],
-                         geometry["width"], geometry["height"])
+
+        scr = (QGuiApplication.screenAt(QPoint(int(geometry["left"]), int(geometry["top"])))
+               or QGuiApplication.screenAt(QCursor.pos())
+               or QGuiApplication.primaryScreen())
+        dpr = scr.devicePixelRatio() if scr else 1.0
+        self.dpr = dpr if dpr > 0 else 1.0
+
+        if not IS_WIN11 and scr:
+            self.setGeometry(scr.geometry())
+        else:
+            self.setGeometry(geometry["left"], geometry["top"],
+                             geometry["width"], geometry["height"])
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -29,9 +40,13 @@ class TranslationOverlay(QWidget):
         if self.frozen is not None:
             p.drawPixmap(self.rect(), self.frozen)
 
+        dpr = self.dpr if not IS_WIN11 else 1.0
         for rect, text in self.items:
             if not text:
                 continue
+            if dpr > 0 and dpr != 1.0:
+                rect = QRect(int(rect.x() / dpr), int(rect.y() / dpr),
+                             int(rect.width() / dpr), int(rect.height() / dpr))
             pad_x, pad_y = 6, 4
             size = max(11, min(24, int(rect.height() * 0.68)))
             font = QFont("Segoe UI", size)
@@ -202,7 +217,23 @@ class FreezeFrameOverlay(QWidget):
         except Exception:
             self.pixmap = QPixmap()
 
-        self.setGeometry(mon["left"], mon["top"], mon["width"], mon["height"])
+        scr = (QGuiApplication.screenAt(QPoint(int(mon["left"]), int(mon["top"])))
+               or QGuiApplication.screenAt(QCursor.pos())
+               or QGuiApplication.primaryScreen())
+        dpr = scr.devicePixelRatio() if scr else 1.0
+        self.dpr = dpr if dpr > 0 else 1.0
+
+        if not IS_WIN11:
+            if not self.pixmap.isNull() and self.dpr != 1.0:
+                self.pixmap.setDevicePixelRatio(self.dpr)
+            if scr:
+                self.setGeometry(scr.geometry())
+            else:
+                self.setGeometry(int(mon["left"] / self.dpr), int(mon["top"] / self.dpr),
+                                 int(mon["width"] / self.dpr), int(mon["height"] / self.dpr))
+        else:
+            self.setGeometry(mon["left"], mon["top"], mon["width"], mon["height"])
+
         self.setCursor(Qt.ArrowCursor)
 
         self.lines = []
@@ -230,9 +261,13 @@ class FreezeFrameOverlay(QWidget):
                 engine = ocr.get_engine(CONFIG)
                 lines = engine.recognize(self.img)
                 words = []
+                dpr = self.dpr if not IS_WIN11 else 1.0
                 for line in lines:
                     for w in line.words:
-                        r = QRect(int(w.x), int(w.y), int(w.w), int(w.h))
+                        if dpr > 0 and dpr != 1.0:
+                            r = QRect(int(w.x / dpr), int(w.y / dpr), int(w.w / dpr), int(w.h / dpr))
+                        else:
+                            r = QRect(int(w.x), int(w.y), int(w.w), int(w.h))
                         words.append((w, line, r))
                 self.ocr_ready.emit(lines, words)
             except Exception as e:
@@ -337,10 +372,12 @@ class FreezeFrameOverlay(QWidget):
                         self.active_word_rect = QRect(min_x, min_y, max_x - min_x, max_y - min_y)
                         self.update()
 
-                        first_line = selected[0][1]
-                        sentence = ocr.sentence_around(self.lines, first_line, selected[0][0])
-                        screen_x = self.mon["left"] + min_x
-                        screen_y = self.mon["top"] + min_y
+                        if not IS_WIN11 and self.dpr != 1.0:
+                            screen_x = self.x() + min_x
+                            screen_y = self.y() + min_y
+                        else:
+                            screen_x = self.mon["left"] + min_x
+                            screen_y = self.mon["top"] + min_y
                         if self.on_word_clicked:
                             self.on_word_clicked(merged_text, sentence, screen_x, screen_y, max_x - min_x, max_y - min_y)
                         return
@@ -355,12 +392,23 @@ class FreezeFrameOverlay(QWidget):
                 from .. import ocr
                 clean_w = ocr.clean_word(w.text)
                 sentence = ocr.sentence_around(self.lines, line, w)
-                screen_x = self.mon["left"] + int(w.x)
-                screen_y = self.mon["top"] + int(w.y)
+                if not IS_WIN11 and self.dpr != 1.0:
+                    dpr = self.dpr
+                    wx = int(w.x / dpr)
+                    wy = int(w.y / dpr)
+                    ww = int(w.w / dpr)
+                    wh = int(w.h / dpr)
+                    screen_x = self.x() + wx
+                    screen_y = self.y() + wy
+                else:
+                    ww = int(w.w)
+                    wh = int(w.h)
+                    screen_x = self.mon["left"] + int(w.x)
+                    screen_y = self.mon["top"] + int(w.y)
                 self.active_word_rect = r.adjusted(-2, -2, 2, 2)
                 self.update()
                 if self.on_word_clicked:
-                    self.on_word_clicked(clean_w, sentence, screen_x, screen_y, int(w.w), int(w.h))
+                    self.on_word_clicked(clean_w, sentence, screen_x, screen_y, ww, wh)
         super().mouseReleaseEvent(e)
 
     def keyPressEvent(self, e):
@@ -384,7 +432,10 @@ class FreezeFrameOverlay(QWidget):
 
         # 1. Стоп-кадр экрана
         if not self.pixmap.isNull():
-            p.drawPixmap(0, 0, self.pixmap)
+            if not IS_WIN11 and self.dpr != 1.0:
+                p.drawPixmap(self.rect(), self.pixmap)
+            else:
+                p.drawPixmap(0, 0, self.pixmap)
 
         # 2. Активное выбранное слово (золотистая рамка)
         if self.active_word_rect:

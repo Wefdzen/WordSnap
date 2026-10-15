@@ -1,23 +1,23 @@
-"""Всплывающее окно режима словаря: появляется у курсора, показывает секции
-источников в настроенном порядке (Переводчик / Looktionary / Oxford-слот)."""
 import html
+import sys
 
 from PySide6.QtCore import (Qt, Signal, QPoint, QRect, QPropertyAnimation,
                             QParallelAnimationGroup, QEasingCurve, QTimer)
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QCursor
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QFrame, QScrollArea, QApplication)
 
 from ..config import CONFIG
 from .. import tts
 from .widgets import Badge, Hairline, Collapsible, flag_label
-from .theme import ACCENT, BG_PANEL, BORDER, TEXT_DIM, BG_CARD
+from .theme import ACCENT, BG_PANEL, BORDER, TEXT_DIM, BG_CARD, IS_WIN11, IS_WIN10
 from .i18n import t as _tr
 
 # жёлто-оливковая подсветка слова (как в оригинале Lookupper)
 HILITE = "#7f801e"
 POPUP_W = 580   # ширина окна перевода (как в оригинале)
 POPUP_MAX_H = 520  # максимальная высота — дальше появляется прокрутка
+RESIZE_MARGIN = 6  # рамка захвата для ручного ресайза окна мышкой
 
 
 class Spoiler(QLabel):
@@ -383,6 +383,8 @@ class DictionaryPopup(QWidget):
         cv.addWidget(self.area)
 
         self.setFixedWidth(POPUP_W)
+        self.setMouseTracking(True)
+        self.card.setMouseTracking(True)
         self.sections: dict[str, SourceSection] = {}
         self._saved = False
         self._anim_grp: QParallelAnimationGroup | None = None
@@ -395,6 +397,102 @@ class DictionaryPopup(QWidget):
         self._pending_pos: tuple[int, int] | None = None
         self._word_rect: tuple[int, int, int, int] | None = None  # (x,y,w,h) подсвеченного слова
         self._placement = "below"                                 # "below" | "above" — с какой стороны от слова
+
+    def _get_resize_edges(self, pos: QPoint) -> Qt.Edge:
+        edges = Qt.Edge(0)
+        x, y = pos.x(), pos.y()
+        w, h = self.width(), self.height()
+        m = RESIZE_MARGIN
+        if x <= m:
+            edges |= Qt.LeftEdge
+        elif x >= w - m:
+            edges |= Qt.RightEdge
+        if y <= m:
+            edges |= Qt.TopEdge
+        elif y >= h - m:
+            edges |= Qt.BottomEdge
+        return edges
+
+    def _update_resize_cursor(self, edges: Qt.Edge):
+        if (edges & Qt.LeftEdge and edges & Qt.TopEdge) or (edges & Qt.RightEdge and edges & Qt.BottomEdge):
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif (edges & Qt.RightEdge and edges & Qt.TopEdge) or (edges & Qt.LeftEdge and edges & Qt.BottomEdge):
+            self.setCursor(Qt.SizeBDiagCursor)
+        elif edges & (Qt.LeftEdge | Qt.RightEdge):
+            self.setCursor(Qt.SizeHorCursor)
+        elif edges & (Qt.TopEdge | Qt.BottomEdge):
+            self.setCursor(Qt.SizeVerCursor)
+        else:
+            self.unsetCursor()
+
+    def mouseMoveEvent(self, e):
+        if not self._zooming and not self._closing:
+            edges = self._get_resize_edges(e.position().toPoint())
+            self._update_resize_cursor(edges)
+        super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and not self._zooming and not self._closing:
+            edges = self._get_resize_edges(e.position().toPoint())
+            if edges:
+                self.setMinimumSize(320, 120)
+                self.setMaximumSize(16777215, 16777215)
+                handle = self.windowHandle()
+                if handle and hasattr(handle, "startSystemResize"):
+                    if handle.startSystemResize(edges):
+                        e.accept()
+                        return
+        super().mousePressEvent(e)
+
+    def leaveEvent(self, e):
+        self.unsetCursor()
+        super().leaveEvent(e)
+
+    def nativeEvent(self, eventType, message):
+        if sys.platform == "win32" and eventType == "windows_generic_MSG":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    if self._zooming or self._closing:
+                        return False, 0
+                    x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                    dpr = self.devicePixelRatioF()
+                    if dpr > 0 and dpr != 1.0:
+                        p = self.mapFromGlobal(QPoint(int(x / dpr), int(y / dpr)))
+                    else:
+                        p = self.mapFromGlobal(QPoint(x, y))
+
+                    px, py = p.x(), p.y()
+                    w, h = self.width(), self.height()
+                    m = RESIZE_MARGIN
+
+                    left = px < m
+                    right = px >= w - m
+                    top = py < m
+                    bottom = py >= h - m
+
+                    if top and left:
+                        return True, 13  # HTTOPLEFT
+                    if top and right:
+                        return True, 14  # HTTOPRIGHT
+                    if bottom and left:
+                        return True, 16  # HTBOTTOMLEFT
+                    if bottom and right:
+                        return True, 17  # HTBOTTOMRIGHT
+                    if left:
+                        return True, 10  # HTLEFT
+                    if right:
+                        return True, 11  # HTRIGHT
+                    if top:
+                        return True, 12  # HTTOP
+                    if bottom:
+                        return True, 15  # HTBOTTOM
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
 
     def _apply_theme(self, light: bool):
         """Светлая/тёмная тема попапа в зависимости от фона под курсором (идея адаптации)."""
@@ -517,9 +615,14 @@ class DictionaryPopup(QWidget):
         self._zooming = False
         self.setWindowOpacity(0.95)  # Фиксируем ровно 95% прозрачности в открытом состоянии
         # возвращаем фикс-ширину, а высоту отпускаем — её подгонит _fit_to_content
-        self.setMinimumWidth(0); self.setMaximumWidth(16777215)
-        self.setFixedWidth(POPUP_W)
-        self.setMinimumHeight(0); self.setMaximumHeight(16777215)
+        if IS_WIN11:
+            self.setMinimumWidth(0); self.setMaximumWidth(16777215)
+            self.setFixedWidth(POPUP_W)
+            self.setMinimumHeight(0); self.setMaximumHeight(16777215)
+        else:
+            self.setMinimumSize(320, 120)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(POPUP_W, self.height())
         if self._pending_pos is not None:       # за время появления нашли слово — переезжаем
             px, py = self._pending_pos
             self._pending_pos = None
@@ -647,9 +750,15 @@ class DictionaryPopup(QWidget):
         поэтому окно «дорастает» под текст на том же окне, а не спавнит новое."""
         if self._zooming:        # во время zoom высоту не трогаем — иначе дёрнется
             return
+        if self.layout():
+            self.layout().invalidate()
+            self.layout().activate()
         host = self.area.widget()
         if not host:
             return
+        if host.layout():
+            host.layout().invalidate()
+            host.layout().activate()
         host.adjustSize()
         chrome = self.btn_bookmark.sizeHint().height() + 8 + 16 + 16
         target = host.sizeHint().height() + chrome + 8
@@ -681,7 +790,18 @@ class DictionaryPopup(QWidget):
             y = self.y()
             if y + h > g.bottom():
                 y = max(g.top(), g.bottom() - h)
-        self._animate_resize(h, y)
+
+        if IS_WIN11:
+            self._animate_resize(h, y)
+        else:
+            if self._resize_anim:
+                self._resize_anim.stop()
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
+            self.setGeometry(self.x(), y, self.width(), h)
+            if self.layout():
+                self.layout().invalidate()
+                self.layout().activate()
 
     def _animate_resize(self, h: int, y: int):
         """Плавно тянет высоту окна (через min/maxHeight) и при необходимости
