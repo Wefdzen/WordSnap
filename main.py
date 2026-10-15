@@ -6,6 +6,7 @@
 import sys
 import threading
 import traceback
+import atexit
 
 from PySide6.QtCore import QObject, Signal, Qt, QRect, QPoint, QTimer
 from PySide6.QtGui import QPixmap, QImage
@@ -18,11 +19,27 @@ from app.gemini import get_ai, GeminiError
 from app.hotkeys import HotkeyManager, parse_hotkey
 from app.ui.main_window import MainWindow, make_app_icon
 from app.ui.popup import DictionaryPopup
-from app.ui.overlay import TranslationOverlay, WordHighlight, FreezeFrameOverlay
+from app.ui.overlay import TranslationOverlay, WordHighlight, FreezeFrameOverlay, force_foreground_and_release_cursor
 from app.ui.i18n import t
 
 # Сообщение ИИ-источников, когда не задан API-ключ провайдера.
 NO_KEY_MSG = "Добавьте API-ключ в Настройках → ИИ-источники."
+
+_GLOBAL_PAUSED_HANDLE = None
+
+def _emergency_resume_process():
+    """Гарантированное возобновление процесса при аварийном завершении приложения (atexit)."""
+    global _GLOBAL_PAUSED_HANDLE
+    if _GLOBAL_PAUSED_HANDLE and sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.ntdll.NtResumeProcess(_GLOBAL_PAUSED_HANDLE)
+            ctypes.windll.kernel32.CloseHandle(_GLOBAL_PAUSED_HANDLE)
+        except Exception:
+            pass
+        _GLOBAL_PAUSED_HANDLE = None
+
+atexit.register(_emergency_resume_process)
 
 def active_window_title() -> tuple[str, str, int, int]:
     """(имя процесса, заголовок активного окна, pid, hwnd) — для контекста ИИ, автопаузы и разворачивания."""
@@ -85,6 +102,9 @@ class Controller(QObject):
         self._busy = False
         self._popup_open = False          # попап открыт → ловим клики мимо него
         self._anki_connected = False
+        self._saved_game_hwnd: int | None = None
+        self._saved_game_pid: int | None = None
+        self._paused_process_handle = None
 
         self.hotkeys.triggered.connect(self.on_hotkey)
         self.hotkeys.escaped.connect(self.on_escape)
@@ -245,6 +265,10 @@ class Controller(QObject):
             if h:
                 ctypes.windll.ntdll.NtSuspendProcess(h)
                 self._paused_process_handle = h
+                global _GLOBAL_PAUSED_HANDLE
+                _GLOBAL_PAUSED_HANDLE = h
+                # Дублируем сброс захвата курсора сразу после приостановки
+                ctypes.windll.user32.ClipCursor(None)
         except Exception as e:
             print("suspend process error:", e)
 
@@ -256,10 +280,10 @@ class Controller(QObject):
         if target in (app_name or "").lower() or target in (win_title or "").lower():
             self._suspend_process(pid, app_name)
 
-    def _resume_paused_process(self):
+    def _resume_paused_process(self, force: bool = False):
         """Возобновление работы приостановленного процесса."""
-        # Если оверлей заморозки всё ещё открыт, не возобновляем игру раньше времени
-        if self.freeze_overlay and self.freeze_overlay.isVisible():
+        # Если оверлей заморозки всё ещё открыт, не возобновляем игру раньше времени (если не force)
+        if not force and self.freeze_overlay and self.freeze_overlay.isVisible():
             return
         h = getattr(self, "_paused_process_handle", None)
         if h:
@@ -271,6 +295,8 @@ class Controller(QObject):
                 print("autopause resume error:", e)
             finally:
                 self._paused_process_handle = None
+                global _GLOBAL_PAUSED_HANDLE
+                _GLOBAL_PAUSED_HANDLE = None
 
     def _check_fullscreenize(self, app_name: str, win_title: str, hwnd: int):
         """Растягивание окна без рамок на весь экран, если совпадает с настройкой."""
@@ -346,9 +372,7 @@ class Controller(QObject):
     # --------------------------------------------------------- горячая клавиша
     def on_hotkey(self, x: int, y: int):
         if self.freeze_overlay and self.freeze_overlay.isVisible():
-            self.freeze_overlay.close()
-            self.freeze_overlay = None
-            self._resume_paused_process()
+            self._close_freeze_mode()
             return
         if self.overlay and self.overlay.isVisible():
             self.overlay.close()
@@ -383,47 +407,125 @@ class Controller(QObject):
     def on_escape(self):
         """Глобальный Esc: закрывает попап/оверлей даже если фокус не на них."""
         self._popup_open = False
+        if self.freeze_overlay and self.freeze_overlay.isVisible():
+            self._close_freeze_mode()
+            return
         if self.popup.isVisible():
             self.popup.close_animated()      # окно сжимается и гаснет (не мгновенно)
-        if self.freeze_overlay and self.freeze_overlay.isVisible():
-            self.freeze_overlay.close()
-            self.freeze_overlay = None
         if self.overlay and self.overlay.isVisible():
             self.overlay.close()
             self.overlay = None
+            self._resume_paused_process()
         self.close_highlight()
-        self._resume_paused_process()
+
+    def _close_freeze_mode(self):
+        """Корректный выход из режима заморозки (Resume & Restore)."""
+        # 1. Сначала возобновляем процесс игры (NtResumeProcess и CloseHandle)
+        self._resume_paused_process(force=True)
+
+        # 2. Закрываем / скрываем оверлей
+        overlay = self.freeze_overlay
+        self.freeze_overlay = None
+        if overlay:
+            try:
+                overlay.close()
+            except Exception:
+                pass
+
+        if self.popup and self.popup.isVisible():
+            self.popup.close_animated()
+
+        # 3. Возвращаем фокус окну игры
+        if getattr(self, "_saved_game_hwnd", None) and sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.SetForegroundWindow(self._saved_game_hwnd)
+            except Exception:
+                pass
+            self._saved_game_hwnd = None
 
     # ============================ РЕЖИМ СЛОВАРЯ ============================
     def run_freeze_dictionary_mode(self, x: int, y: int):
         """Режим «Заморозка экрана + Свободный курсор» для игр без видимого курсора."""
         self.close_highlight()
-        app_name, win_title, pid, hwnd = active_window_title()
-        self._check_autopause(app_name, win_title, pid)
-        self._check_fullscreenize(app_name, win_title, hwnd)
 
+        # Шаг 3.1: До показа оверлея сохраняем game_hwnd и game_pid
+        app_name, win_title, game_pid, game_hwnd = active_window_title()
+        if sys.platform == "win32" and not game_hwnd:
+            try:
+                import ctypes
+                import ctypes.wintypes as wt
+                game_hwnd = int(ctypes.windll.user32.GetForegroundWindow())
+                pid_dw = wt.DWORD()
+                ctypes.windll.user32.GetWindowThreadProcessId(game_hwnd, ctypes.byref(pid_dw))
+                game_pid = int(pid_dw.value)
+            except Exception:
+                pass
+        self._saved_game_hwnd = game_hwnd
+        self._saved_game_pid = game_pid
+
+        self._check_fullscreenize(app_name, win_title, game_hwnd)
+
+        # Шаг 3.2: Делаем скриншот экрана
         try:
             img, mon = capture.grab_monitor_at(x, y)
         except Exception as e:
             self.bridge.error.emit(str(e))
-            self._resume_paused_process()
+            self._resume_paused_process(force=True)
             return
 
         self._freeze_full_shot = img
+
+        # Шаг 3.3: Создаём и показываем FreezeFrameOverlay
         self.freeze_overlay = FreezeFrameOverlay(
             img, mon,
             on_word_clicked=lambda w, s, sx, sy, ww, wh: self._on_freeze_word_clicked(w, s, sx, sy, ww, wh, app_name, win_title),
             on_close=self._on_freeze_closed
         )
-        self.freeze_overlay.show()
+        self.freeze_overlay.setGeometry(mon["left"], mon["top"], mon["width"], mon["height"])
+        self.freeze_overlay.showFullScreen()
         self.freeze_overlay.raise_()
         self.freeze_overlay.activateWindow()
 
+        # Шаг 3.4: Принудительный перехват фокуса и сброс захвата курсора,
+        # пока игра ещё жива и успевает обработать потерю фокуса (WM_KILLFOCUS)
+        force_foreground_and_release_cursor(self.freeze_overlay)
+
+        # Шаг 3.5: Запуск OCR-потока
+        self.freeze_overlay._start_ocr_thread()
+
+        # Шаг 3.6: Если включена автопауза, вызываем заморозку процесса с задержкой 30 мс
+        target = (CONFIG.get("autopause_window") or "").strip().lower()
+        if target and game_pid and (target in (app_name or "").lower() or target in (win_title or "").lower()):
+            def do_pause():
+                if self.freeze_overlay and self.freeze_overlay.isVisible():
+                    self._suspend_process(game_pid, app_name)
+                    if sys.platform == "win32":
+                        try:
+                            import ctypes
+                            ctypes.windll.user32.ClipCursor(None)
+                        except Exception:
+                            pass
+            QTimer.singleShot(30, do_pause)
+
     def _on_freeze_closed(self):
+        """Коллбэк при закрытии оверлея изнутри (Esc / Q / клик по крестику)."""
+        # 1. Сначала возобновляем процесс игры
+        self._resume_paused_process(force=True)
+
+        # 2. Скрываем оверлей и попап
         self.freeze_overlay = None
-        if self.popup.isVisible():
+        if self.popup and self.popup.isVisible():
             self.popup.close_animated()
-        self._resume_paused_process()
+
+        # 3. Возвращаем фокус окну игры
+        if getattr(self, "_saved_game_hwnd", None) and sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.SetForegroundWindow(self._saved_game_hwnd)
+            except Exception:
+                pass
+            self._saved_game_hwnd = None
 
     def _on_freeze_word_clicked(self, w_clean: str, sentence: str, sx: int, sy: int, w: int, h: int, app_name: str, win_title: str):
         if not w_clean:

@@ -103,6 +103,46 @@ class WordHighlight(QWidget):
         p.drawRoundedRect(self.rect(), 3, 3)
 
 
+def force_foreground_and_release_cursor(widget) -> None:
+    """Принудительный перехват системного фокуса окном оверлея и сброс захвата курсора Windows."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        overlay_hwnd = int(widget.winId())
+        fg_hwnd = user32.GetForegroundWindow()
+
+        if fg_hwnd and fg_hwnd != overlay_hwnd:
+            fg_thread_id = user32.GetWindowThreadProcessId(fg_hwnd, None)
+            my_thread_id = kernel32.GetCurrentThreadId()
+            if fg_thread_id != my_thread_id:
+                user32.AttachThreadInput(fg_thread_id, my_thread_id, True)
+                try:
+                    # Имитируем нажатие и отпускание Alt (VK_MENU = 0x12) для обхода ForegroundLockTimeout
+                    VK_MENU = 0x12
+                    KEYEVENTF_KEYUP = 0x0002
+                    user32.keybd_event(VK_MENU, 0, 0, 0)
+                    user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+                    user32.SetForegroundWindow(overlay_hwnd)
+                    user32.SetFocus(overlay_hwnd)
+                finally:
+                    user32.AttachThreadInput(fg_thread_id, my_thread_id, False)
+            else:
+                user32.SetForegroundWindow(overlay_hwnd)
+                user32.SetFocus(overlay_hwnd)
+        else:
+            user32.SetForegroundWindow(overlay_hwnd)
+            user32.SetFocus(overlay_hwnd)
+
+        user32.ClipCursor(None)
+        user32.ReleaseCapture()
+    except Exception as e:
+        print("force_foreground_and_release_cursor error:", e)
+
+
 class FreezeFrameOverlay(QWidget):
     """Полноэкранный оверлей «Заморозка экрана + Свободный курсор»:
     1. Замораживает кадр игры пиксель-в-пиксель.
@@ -115,7 +155,7 @@ class FreezeFrameOverlay(QWidget):
     ocr_ready = Signal(object, object)  # (lines, words)
 
     def __init__(self, img, mon: dict, on_word_clicked=None, on_close=None, parent=None):
-        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         super().__init__(parent, flags)
         self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.setMouseTracking(True)
@@ -142,21 +182,14 @@ class FreezeFrameOverlay(QWidget):
         self.active_word_rect = None
         self.is_scanning = True
         self._close_btn_rect = None
-
-        # Разблокируем захват курсора игрой в Windows
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                ctypes.windll.user32.ClipCursor(None)
-                while ctypes.windll.user32.ShowCursor(True) < 0:
-                    pass
-            except Exception:
-                pass
+        self._ocr_started = False
 
         self.ocr_ready.connect(self._on_ocr_finished)
-        self._start_ocr_thread()
 
     def _start_ocr_thread(self):
+        if self._ocr_started:
+            return
+        self._ocr_started = True
         def worker():
             try:
                 from .. import ocr
@@ -224,6 +257,7 @@ class FreezeFrameOverlay(QWidget):
         super().keyPressEvent(e)
 
     def closeEvent(self, e):
+        self.hide()
         if self.on_close:
             self.on_close()
         super().closeEvent(e)
