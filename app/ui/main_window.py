@@ -45,6 +45,15 @@ def make_app_icon() -> QIcon:
     p.end()
     return QIcon(pm)
 
+def make_title_logo_icon() -> QIcon:
+    """Иконка для логотипа в заголовке окна (использует iconApp.png)."""
+    p = os.path.join(ASSETS_DIR, "iconApp.png")
+    if os.path.exists(p):
+        ic = QIcon(p)
+        if not ic.isNull():
+            return ic
+    return make_app_icon()
+
 def _winctrl_icon(kind: str, color: str = ICON) -> QIcon:
     """Стандартные иконки управления окном (минимизация/восстановление/
     максимизация/закрытие), как в заголовке окон Windows 11."""
@@ -76,7 +85,7 @@ class TitleBar(QFrame):
         self.setFixedHeight(44)
         lay = QHBoxLayout(self); lay.setContentsMargins(12, 0, 0, 0); lay.setSpacing(4)
 
-        logo = QLabel(); logo.setPixmap(make_app_icon().pixmap(22, 22))
+        logo = QLabel(); logo.setPixmap(make_title_logo_icon().pixmap(22, 22))
         lay.addWidget(logo); lay.addSpacing(14)
 
         self.tabs = []
